@@ -45,7 +45,7 @@ export const TIER_ORDER: readonly Tier[] = ['fast', 'balanced', 'deep']
 const TIER_CRITERIA: Record<Tier, string> = {
   // No code edits here: Anthropic's model guide (2026-11) keeps small models on
   // work where a mistake is cheap to spot, and code edits on the main model.
-  fast: 'Mechanical, local and read-only: find files, read or summarise a file or log, run one command or the tests, answer something already in context. Any code edit is at least balanced.',
+  fast: 'Changes no file at all: find files, read or summarise a file or log, run one command or the tests, answer something already in context. If the task writes or edits any file (code, config, locales, README or other docs), even one line, it is not fast.',
   balanced:
     'Ordinary engineering: implement a well-specified change across a few files, write tests, fix a clearly described bug, review a small diff.',
   deep: 'Hard or high-stakes: architecture and design, debugging a failure whose cause is unknown, security, data migrations, concurrency, anything touching production or money.',
