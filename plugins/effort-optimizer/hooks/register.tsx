@@ -229,7 +229,7 @@ async function pick($: EngineInterface, text: string, now: Level | ''): Promise<
   const messages = await $.session.messages()
   const lastReply = lastAssistantText(messages).slice(0, 600)
   const r = await $.model.complete({
-    model: 'claude-sonnet-5-5',
+    model: 'haiku', // classification work; same alias model-router's judge uses
     prompt: pickPrompt(text.slice(0, 4000), lastReply, now),
     maxTokens: 120,
     effort: 'low',
