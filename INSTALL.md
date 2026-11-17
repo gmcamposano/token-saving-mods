@@ -44,6 +44,7 @@ Opcionales (los mods funcionan sin ellos):
    Prueba prompt-coach escribiendo un prompt con "piensa bien": debe salir un aviso.
 
 6. Opcional: aplica `extras/prompt-coach-regla.md`.
+7. En la máquina donde editas los mods: copia `extras/CLAUDE-global-regla.md` dentro de `~/.claude/CLAUDE.md` (Claude preguntará si sube cada cambio a GitHub).
 
 ## Instalar desde GitHub (recomendado)
 
