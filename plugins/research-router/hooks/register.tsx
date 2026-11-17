@@ -297,6 +297,19 @@ async function withTimeout<T>($: EngineInterface, p: Promise<T>, ms: number, wha
 }
 
 // The desktop app's process may not have nvm on its PATH, so look in the usual places by hand.
+// An interactive zsh (-i) turns on job control and makes itself the terminal's foreground
+// process group. Claude Code then gets SIGTTIN on its next keyboard read and the outer shell
+// shows "suspended (tty input) claude". setsid detaches the lookup from the terminal (Linux);
+// +m turns job control off where setsid is missing (macOS). stdin is /dev/null either way.
+const SHELL_PATH_LOOKUP = [
+  '/bin/sh',
+  '-c',
+  'if command -v setsid >/dev/null 2>&1; then exec setsid -w /bin/zsh +m -ilc "$1" </dev/null; fi; ' +
+    'exec /bin/zsh +m -ilc "$1" </dev/null',
+  'sh',
+  'command -v firecrawl; command -v node',
+]
+
 async function findFirecrawl($: EngineInterface): Promise<Firecrawl | null> {
   const dirs: string[] = []
   const nvm = `${home}/.nvm/versions/node`
@@ -320,7 +333,7 @@ async function findFirecrawl($: EngineInterface): Promise<Firecrawl | null> {
   }
   // Last try: the person's own shell knows their PATH.
   try {
-    const r = await $.process.run(['/bin/zsh', '-ilc', 'command -v firecrawl; command -v node'], { timeoutMs: 8000 })
+    const r = await $.process.run(SHELL_PATH_LOOKUP, { timeoutMs: 8000 })
     const found = r.stdout.split('\n').map(s => s.trim()).filter(s => s.startsWith('/'))
     const bin = found.find(s => s.endsWith('/firecrawl'))
     const node = found.find(s => s.endsWith('/node'))
