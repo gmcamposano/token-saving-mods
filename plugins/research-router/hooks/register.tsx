@@ -2,6 +2,31 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelUsage, Register, TurnUsage } from 'claude-code'
 import type { AgentView, AutoView, FoundView, RunView, SourceView, ToolUse } from '../types'
 import { explorerSvg } from './mascot.ts'
+import {
+  CAPS,
+  CAVEATS,
+  type Call,
+  clean,
+  EFFORTS,
+  joinPrompt,
+  type Link,
+  oneLine,
+  PAGE_CHARS,
+  type Plan,
+  parseJoin,
+  parseKeep,
+  parsePlan,
+  parseWriteUp,
+  planFallback,
+  planPrompt,
+  relevantPrompt,
+  shortenPrompt,
+  type Source,
+  SYSTEM,
+  urlsIn,
+  wasCut,
+  writeUpPrompt,
+} from './prompts.ts'
 
 const NAME = 'research-router'
 const TITLE = 'Research Router'
@@ -31,14 +56,9 @@ const MAX_AGENT_MEMO = 32
 const MAX_RUNS = 8
 const MAX_AUTO = 12
 const SEARCH_LIMIT = 4
-const MAX_QUERIES = 2
 const MAX_SOURCES = 6
 const MAX_FETCHES = 4
-const MIN_PARTS = 2
-const MAX_PARTS = 4
 // What the worker's model reads of each page, and of all of them together.
-const PAGE_CHARS = 12_000
-const ALL_CHARS = 60_000
 // What the notes file keeps of each page's own text.
 const NOTE_PAGE_CHARS = 40_000
 // A page shorter than this after the HTML is stripped is a script shell, not an article.
@@ -66,28 +86,16 @@ const GOOD = '#16a34a'
 const BAD = '#dc2626'
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 research-router/2'
 
-const SYSTEM = [
-  'You are a research worker. You read web search results and pages, and you report what they say.',
-  'Write plain, simple English in short sentences. Never use em dashes or en dashes. Never use the word "ship".',
-  'Use only the sources you are given. Never invent a number, date, name or quote.',
-].join(' ')
-
 // Connector tools are matched by what they say they do, because their names are random ids.
 const WEBBY = /\b(web|internet|online|google|bing|urls?|web ?pages?|websites?|search engine|serp)\b/i
 const ACTION = /\b(search\w*|scrap\w*|crawl\w*|fetch\w*|brows\w*|research\w*)\b/i
 
 type Firecrawl = { bin: string; node: string; path: string }
 type Kit = { firecrawl: Firecrawl | null; webSearch: boolean; webFetch: boolean; connectors: { name: string; description: string }[] }
-type Link = { title: string; url: string }
-// `via` names the path that read the page, for the log and the notes file.
-// `newest`: the newest date found on the page, YYYY-MM-DD, when there is one.
-type Source = Link & { text: string; via: string; newest?: string }
 // `noWebFetch`: WebFetch failed to answer once in this run (missing, or no answer in time), so the run stops asking it.
 // `agentCost`: dollars the deep-mode subagents used, at list price.
 type Job = { id: number; question: string; reply: number; tools: ToolUse[]; helperIn: number; helperOut: number; read: number; agentCost: number; noWebFetch?: boolean }
 type CallResult = { text?: string; result?: unknown; isError?: true; deny?: string }
-// `since`: the first day of the time window the request names, YYYY-MM-DD. `official`: pages to read first.
-type Plan = { mode: 'quick' | 'deep'; queries: string[]; parts: string[]; since: string | null; official: string[] }
 type Done = { answer: string; reason: string; model?: string; usage?: TurnUsage }
 type WebSearchRecord = { query: string; results: unknown[]; durationSeconds: number; searchCount?: number }
 
@@ -193,19 +201,6 @@ async function log($: EngineInterface, what: string, detail: unknown) {
   }
 }
 
-// Plain text: no em or en dashes, never the banned word.
-function clean(raw: string, max: number) {
-  return raw
-    .replace(/\s*[—–]\s*/g, ', ')
-    .replace(/\bship(s|ped|ping)?\b/gi, 'publish')
-    .trim()
-    .slice(0, max)
-}
-
-function oneLine(raw: string, max: number) {
-  return clean(raw.replace(/\s+/g, ' '), max)
-}
-
 function tokens(chars: number) {
   return Math.ceil(chars / 4)
 }
@@ -275,22 +270,9 @@ function newestDate(raw: string, today: string): string | undefined {
   return found.filter(d => /^20\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(d) && d <= today).sort().pop()
 }
 
-// Said to every writer: the brief keeps what the sources hedge, and never upgrades a claim.
-const CAVEATS =
-  'Keep each source\'s own caveats and limits. Never state a claim more strongly than its source does. Say who measured a number: a vendor testing its own product is "the vendor\'s own test", never "controlled" or "independent" unless the source says so. Say when a number comes from one source only.'
-
 // A connector's name without its random server id.
 function shortName(tool: string) {
   return tool.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '')
-}
-
-function urlsIn(text: string) {
-  const out: string[] = []
-  for (const m of text.matchAll(/https?:\/\/[^\s)\]"'<>,|]+/g)) {
-    const u = m[0].replace(/[.;:]+$/, '')
-    if (!out.includes(u)) out.push(u)
-  }
-  return out
 }
 
 async function exists($: EngineInterface, path: string) {
@@ -392,73 +374,29 @@ function countUsage(u: ModelUsage | undefined) {
   return { input: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0), output: u.output_tokens ?? 0 }
 }
 
-async function ask($: EngineInterface, job: Job, prompt: string, maxTokens: number, timeoutMs: number) {
-  const r = await $.model.complete({ model: MODEL, system: SYSTEM, prompt, maxTokens, timeoutMs })
+async function ask($: EngineInterface, job: Job, call: Call, prompt: string, timeoutMs: number) {
+  const effort = EFFORTS[call]
+  const r = await $.model.complete({ model: MODEL, system: SYSTEM, prompt, maxTokens: CAPS[call], timeoutMs, ...(effort && { effort }) })
   const u = countUsage(r.usage)
   job.helperIn += u.input
   job.helperOut += u.output
   await used($, job, MODEL, 'model')
   if (!r.isAnswered) throw new Error(`the worker model did not answer (${r.reason})`)
+  // A cut reply is still used (each caller's parser has its fallback), but it is logged, never silent.
+  if (wasCut(r.usage?.output_tokens, call)) await log($, `run ${job.id}`, `the ${call} reply used its whole cap (${CAPS[call]} tokens) and may be cut`)
   return r.text
-}
-
-function cleanQueries(raw: unknown[]) {
-  return raw
-    .map(q => String(q ?? ''))
-    // Strip quotes only around the whole line: a query can start with a quoted phrase.
-    .map(l => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim().replace(/^(["'])(.*)\1$/, '$2').trim())
-    .filter(l => l.length > 2)
 }
 
 // The planner picks quick or deep, and writes the queries and the parts. `deep` forces deep.
 async function plan($: EngineInterface, job: Job, question: string, forceDeep: boolean, today: string): Promise<Plan> {
-  const fallback: Plan = { mode: forceDeep ? 'deep' : 'quick', queries: [oneLine(question, 200)], parts: forceDeep ? [oneLine(question, 400)] : [], since: null, official: [] }
   try {
-    const text = await ask(
-      $,
-      job,
-      [
-        `Today is ${today}.`,
-        `Research request: ${question}`,
-        '',
-        forceDeep
-          ? 'This request is deep: split it into 2 to 4 separate lines of research.'
-          : 'Decide how big it is. "quick": one or two web searches answer it. "deep": it needs 2 to 4 separate lines of research, for example several products, a broad survey, or a comparison across many angles.',
-        `Write ${MAX_QUERIES} short web search queries, under 12 words each, that would find the best sources. If the request names a time window, such as "last 7 days", put the month and year in the queries.`,
-        'Prefer official sources. For a product, that is its own changelog, release notes, docs or GitHub releases page; for Claude Code, its docs changelog and https://github.com/anthropics/claude-code/releases. Put up to 2 such page URLs in "official", only URLs you are sure exist, else [].',
-        'Set "since" to the first day of the time window the request names, as YYYY-MM-DD, counted back from today. With no window, "since" is null.',
-        'For deep, also write 2 to 4 self-contained sub-questions, one per line of research. For quick, parts is [].',
-        'Answer with JSON only, in this form:',
-        '{"mode":"quick","queries":["...","..."],"parts":[],"official":[],"since":null}',
-      ].join('\n'),
-      400,
-      PLAN_MS,
-    )
-    const json = /\{[\s\S]*\}/.exec(text)?.[0]
-    if (!json) throw new Error('the planner gave no JSON')
-    const data = JSON.parse(json) as { mode?: unknown; queries?: unknown; parts?: unknown; official?: unknown; since?: unknown }
-    const queries = cleanQueries(Array.isArray(data.queries) ? data.queries : []).slice(0, MAX_QUERIES).map(q => oneLine(q, 200))
-    const parts = cleanQueries(Array.isArray(data.parts) ? data.parts : []).slice(0, MAX_PARTS).map(p => oneLine(p, 400))
-    const mode = forceDeep || (data.mode === 'deep' && parts.length >= MIN_PARTS) ? 'deep' : 'quick'
-    const official = (Array.isArray(data.official) ? data.official : [])
-      .map(u => String(u ?? '').trim())
-      .filter(u => /^https:\/\/[^\s]+$/.test(u))
-      .slice(0, 2)
-    const since = typeof data.since === 'string' && /^20\d\d-\d\d-\d\d$/.test(data.since) && data.since <= today ? data.since : null
-    return {
-      mode,
-      queries: queries.length ? queries : fallback.queries,
-      parts: mode === 'deep' ? (parts.length ? parts : fallback.parts) : [],
-      since,
-      official,
-    }
+    return parsePlan(await ask($, job, 'plan', planPrompt(question, forceDeep, today), PLAN_MS), question, forceDeep, today)
   } catch (err) {
     await log($, 'plan', err)
-    return fallback
+    return planFallback(question, forceDeep)
   }
 }
 
-// Rejects when no tool has that name, or when the call gives no answer in time.
 async function callTool($: EngineInterface, input: Record<string, unknown>, ms = TOOL_MS): Promise<CallResult> {
   const call = ($.tool.call as unknown as (i: Record<string, unknown>) => Promise<CallResult>)(input)
   return (await withTimeout($, call, ms, String(input.tool))) ?? {}
@@ -705,34 +643,10 @@ async function relevant($: EngineInterface, job: Job, question: string, sources:
   const read = sources.filter(s => s.text)
   if (!read.length) return sources
   try {
-    const text = await ask(
-      $,
-      job,
-      [
-        `Today is ${today}.`,
-        `Research request: ${question}`,
-        since ? `The request covers ${since} to ${today}.` : '',
-        '',
-        'Pages found for it, numbered, each with its first lines:',
-        read.map((s, i) => `[${i + 1}] ${s.title} (${s.url})${s.newest ? `, newest date ${s.newest}` : ''}\n${s.text.slice(0, 600)}`).join('\n\n'),
-        '',
-        'Which pages to keep: a page stays only if it is about the subject of the request itself, not a different product or project with a similar name.',
-        since ? 'With a time window, a page stays only if it holds something from inside the window.' : '',
-        'Answer with this JSON and nothing else: {"keep":[1,2],"why":"one short line"}',
-      ]
-        .filter(l => l !== '')
-        .join('\n'),
-      200,
-      PLAN_MS,
-    )
-    const json = /\{[\s\S]*\}/.exec(text)?.[0]
-    if (!json) throw new Error('the relevance check gave no JSON')
-    const data = JSON.parse(json) as { keep?: unknown; why?: unknown }
-    if (!Array.isArray(data.keep)) throw new Error('the relevance check gave no "keep" list')
-    const keep = new Set(data.keep.map(Number))
+    const { keep, why } = parseKeep(await ask($, job, 'relevant', relevantPrompt(question, read, since, today), PLAN_MS))
     const kept = read.filter((_, i) => keep.has(i + 1))
     const dropped = read.filter((_, i) => !keep.has(i + 1))
-    await log($, `run ${job.id}`, `relevance check kept ${kept.length} of ${read.length} pages${dropped.length ? `, dropped ${dropped.map(s => s.url).join(' ')}` : ''}${typeof data.why === 'string' ? `: ${oneLine(data.why, 160)}` : ''}`)
+    await log($, `run ${job.id}`, `relevance check kept ${kept.length} of ${read.length} pages${dropped.length ? `, dropped ${dropped.map(s => s.url).join(' ')}` : ''}${why !== undefined ? `: ${oneLine(why, 160)}` : ''}`)
     return kept
   } catch (err) {
     await log($, 'relevance', `${err instanceof Error ? err.message : String(err)}; every page kept`)
@@ -765,42 +679,7 @@ async function viaConnector($: EngineInterface, job: Job, k: Kit, query: string)
 }
 
 async function writeUp($: EngineInterface, job: Job, question: string, sources: Source[], notes: string[], today: string, since: string | null) {
-  let room = ALL_CHARS
-  const take = (s: string) => {
-    const body = s.slice(0, Math.max(0, Math.min(PAGE_CHARS, room)))
-    room -= body.length
-    return body
-  }
-  const blocks = sources.map((s, i) => `[${i + 1}] ${s.title} (${s.url})\n${s.text ? take(s.text) : '(page not read; only the search engine listed it)'}`)
-  const background = notes.map(n => take(n)).filter(Boolean)
-  const text = await ask(
-    $,
-    job,
-    [
-      `Today is ${today}.${since ? ` The question covers ${since} to ${today}: leave out anything dated before ${since}, and say so if little falls inside it.` : ''}`,
-      `Question: ${question}`,
-      '',
-      'Sources, numbered:',
-      blocks.join('\n\n---\n\n') || '(none: no page was about the question)',
-      '',
-      'Search engine notes (background only, no number of their own; a claim from them takes the number of the source it names, else no number):',
-      background.join('\n\n---\n\n') || '(none)',
-      '',
-      'Write two parts.',
-      'BRIEF: at most 180 words. Lead with the direct answer. Put [n] after each claim, n being the source number. Say plainly what the sources do not settle.',
-      CAVEATS,
-      'NOTES: detailed notes for a later reader, source by source: the facts, numbers, dates and short quotes that bear on the question, each with its [n]. At most 900 words.',
-      'If the sources do not answer the question, say so in the brief.',
-      'Answer in exactly this form and nothing else:',
-      '<brief>...</brief>',
-      '<notes>...</notes>',
-    ].join('\n'),
-    2500,
-    WRITE_MS,
-  )
-  const brief = /<brief>([\s\S]*?)<\/brief>/i.exec(text)?.[1] ?? text.slice(0, 1200)
-  const more = /<notes>([\s\S]*?)<\/notes>/i.exec(text)?.[1] ?? text
-  return { brief: clean(brief, 1600), notes: clean(more, 12_000) }
+  return parseWriteUp(await ask($, job, 'writeUp', writeUpPrompt(question, sources, notes, today, since), WRITE_MS))
 }
 
 function partPrompt(question: string, part: string, n: number, total: number, today: string) {
@@ -944,28 +823,7 @@ async function viaSubagents($: EngineInterface, job: Job, question: string, part
 }
 
 async function joinReports($: EngineInterface, job: Job, question: string, sources: Source[], reports: string[], failed: string[]) {
-  const text = await ask(
-    $,
-    job,
-    [
-      `Question: ${question}`,
-      '',
-      'Sources, numbered:',
-      sources.map((s, i) => `[${i + 1}] ${s.title} (${s.url})`).join('\n') || '(none)',
-      '',
-      'Reports from the research workers, already using those numbers:',
-      reports.join('\n\n---\n\n').slice(0, ALL_CHARS),
-      '',
-      failed.length ? `These parts failed and have no report: ${failed.join('; ')}` : '',
-      'Write one BRIEF: at most 200 words. Lead with the direct answer. Keep the [n] after each claim. Say plainly what the reports do not settle, and name any part that failed.',
-      CAVEATS,
-      'Answer in exactly this form and nothing else:',
-      '<brief>...</brief>',
-    ].join('\n'),
-    1200,
-    WRITE_MS,
-  )
-  return clean(/<brief>([\s\S]*?)<\/brief>/i.exec(text)?.[1] ?? text.slice(0, 1400), 1800)
+  return parseJoin(await ask($, job, 'join', joinPrompt(question, sources, reports, failed), WRITE_MS))
 }
 
 function slug(question: string) {
@@ -1266,23 +1124,21 @@ async function shorten($: EngineInterface, query: string, toolUseId: string | un
     .complete({
     model: MODEL,
     system: SYSTEM,
-    prompt: [
-      `Search query: ${query}`,
-      '',
-      "Below is a web search tool's commentary on its results. Shorten it to the findings that matter for the query.",
-      'Keep every number, name, date and URL that bears on the query, each finding next to its URL. Short bullets. At most 250 words. No preamble.',
-      '',
-      'Commentary:',
-      commentary.slice(0, ALL_CHARS),
-    ].join('\n'),
-    maxTokens: 700,
-    // There is no switch for thinking here: low effort is the least the engine can ask for.
-    effort: 'low',
+    prompt: shortenPrompt(query, commentary),
+    maxTokens: CAPS.shorten,
+    effort: EFFORTS.shorten,
     timeoutMs: AUTO_MS,
   })
     .finally(() => update($, busyAtom, n => Math.max(0, (n ?? 0) - 1)))
   const u = countUsage(m.usage)
   const cost = dollars(u.input, u.output)
+  // A cut summary would replace the whole result with part of it: keep the original.
+  if (m.isAnswered && wasCut(m.usage?.output_tokens, 'shorten')) {
+    await log($, 'auto', `Haiku's summary for "${oneLine(query, 80)}" used its whole cap (${CAPS.shorten} tokens), original kept, cost ${money(cost)}`)
+    await ledger(before, 'failed', u)
+    await addAuto($, { at, query: oneLine(query, 120), status: 'failed', before, after: before, note: 'Haiku ran out of room, original kept', cost })
+    return null
+  }
   if (!m.isAnswered || !m.text.trim()) {
     await log($, 'auto', `Haiku gave no answer for "${oneLine(query, 80)}" (${m.isAnswered ? 'empty' : m.reason}), original kept, cost ${money(cost)}`)
     await ledger(before, 'failed', u)
