@@ -54,6 +54,22 @@ async function checkRepo($: Engine, force: boolean): Promise<void> {
   $.ui.toast(`prompt-coach: token-saving-mods tiene ${parts.join(' y ')}. ¿Subirlo a GitHub?`)
 }
 
+// Once per session: fetch and warn if GitHub has commits this machine lacks. Never pulls.
+const REMOTE_CHECK = [
+  'sh',
+  '-c',
+  'D="$HOME/.claude/local-marketplaces/token-saving-mods"; [ -d "$D/.git" ] || exit 0; cd "$D" || exit 0; ' +
+    'git fetch -q 2>/dev/null || exit 0; git rev-list --count HEAD..@{u} 2>/dev/null || echo 0',
+]
+
+async function checkRemote($: Engine): Promise<void> {
+  const r = await $.process.run(REMOTE_CHECK, { timeoutMs: 15000 })
+  const behind = Number(r.stdout.trim()) || 0
+  if (behind > 0) {
+    $.ui.toast(`prompt-coach: token-saving-mods tiene ${behind} commit(s) nuevos en GitHub. Haz git pull (revisa con UPDATE.md).`)
+  }
+}
+
 export const register: Register = on => {
   let n = 0
   const lastShown = new Map<string, number>()
@@ -76,6 +92,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const res = await next(e)
     await checkRepo($, true).catch(() => undefined)
+    void checkRemote($).catch(() => undefined) // background: never delays the session
     return res
   }).catch(($, e, next) => next(e))
 
