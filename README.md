@@ -9,7 +9,8 @@ check-filter y prompt-coach. Repo privado de uso personal.
 Requiere acceso a este repo y credencial git para github.com (`gh auth login` y luego `gh auth setup-git`).
 
 ```
-/plugin marketplace add gmcamposano/token-saving-mods
+git clone https://github.com/gmcamposano/token-saving-mods ~/.claude/local-marketplaces/token-saving-mods
+/plugin marketplace add ~/.claude/local-marketplaces/token-saving-mods
 /plugin install prompt-coach@token-saving-mods
 ```
 
@@ -18,6 +19,7 @@ Repite `/plugin install <mod>@token-saving-mods` para cada mod (lista completa e
 ## Actualizar
 
 ```
+git -C ~/.claude/local-marketplaces/token-saving-mods pull
 claude plugin marketplace update token-saving-mods
 ```
 

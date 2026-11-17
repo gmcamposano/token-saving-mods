@@ -44,11 +44,23 @@ Opcionales (los mods funcionan sin ellos):
    Prueba prompt-coach escribiendo un prompt con "piensa bien": debe salir un aviso.
 
 6. Opcional: aplica `extras/prompt-coach-regla.md`.
-7. En la máquina donde editas los mods: copia `extras/CLAUDE-global-regla.md` dentro de `~/.claude/CLAUDE.md` (Claude preguntará si sube cada cambio a GitHub).
+7. En cada máquina: copia `extras/CLAUDE-global-regla.md` dentro de `~/.claude/CLAUDE.md` (Claude preguntará si sube cada cambio a GitHub).
 
-## Instalar desde GitHub (recomendado)
+## Instalar desde GitHub (recomendado, igual en todas tus máquinas)
 
-`/plugin marketplace add gmcamposano/token-saving-mods` en lugar de los pasos 1-2. Actualiza con `claude plugin marketplace update token-saving-mods`.
+En lugar de los pasos 1-2, clona el repo en la misma ruta y agrégalo como marketplace local:
+
+```
+git clone https://github.com/gmcamposano/token-saving-mods ~/.claude/local-marketplaces/token-saving-mods
+```
+```
+/plugin marketplace add ~/.claude/local-marketplaces/token-saving-mods
+```
+
+Así cada máquina tiene un clon editable: prompt-coach avisa si hay cambios sin commit o sin push,
+y la regla de `extras/CLAUDE-global-regla.md` hace que Claude pregunte si los sube.
+Para traer cambios de otra máquina: `git -C ~/.claude/local-marketplaces/token-saving-mods pull`,
+luego `claude plugin marketplace update token-saving-mods` y reinicia.
 
 ## Actualizar desde un zip nuevo
 

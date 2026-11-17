@@ -1,4 +1,4 @@
-import type { Register } from 'claude-code'
+import type { Engine, Register } from 'claude-code'
 
 // Zero-token prompt linter: toasts only the user sees. Nothing reaches the model.
 type Rule = { id: string; test: (t: string) => boolean; tip: string }
@@ -27,6 +27,33 @@ const RULES: Rule[] = [
 
 const COOLDOWN = 5 // prompts between repeats of the same tip
 
+// Unpushed-changes reminder for the mods repo itself. Local git only (no fetch), zero model tokens.
+const REPO_CHECK = [
+  'sh',
+  '-c',
+  'D="$HOME/.claude/local-marketplaces/token-saving-mods"; [ -d "$D/.git" ] || exit 0; cd "$D" || exit 0; ' +
+    'd=$(git status --porcelain | wc -l); a=$(git rev-list --count @{u}..HEAD 2>/dev/null || echo 0); echo "$d $a"',
+]
+
+let lastKey = ''
+let turnsSince = 0
+
+async function checkRepo($: Engine, force: boolean): Promise<void> {
+  const r = await $.process.run(REPO_CHECK, { timeoutMs: 5000 })
+  const [dirty = 0, ahead = 0] = r.stdout.trim().split(/\s+/).map(Number)
+  if (!dirty && !ahead) {
+    lastKey = ''
+    return
+  }
+  const key = `${dirty} ${ahead}`
+  turnsSince += 1
+  if (!force && key === lastKey && turnsSince < 10) return
+  lastKey = key
+  turnsSince = 0
+  const parts = [dirty ? `${dirty} archivo(s) sin commit` : '', ahead ? `${ahead} commit(s) sin push` : ''].filter(Boolean)
+  $.ui.toast(`prompt-coach: token-saving-mods tiene ${parts.join(' y ')}. ¿Subirlo a GitHub?`)
+}
+
 export const register: Register = on => {
   let n = 0
   const lastShown = new Map<string, number>()
@@ -44,5 +71,17 @@ export const register: Register = on => {
       $.ui.toast(hit.tip)
     }
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('session.start', async ($, e, next) => {
+    const res = await next(e)
+    await checkRepo($, true).catch(() => undefined)
+    return res
+  }).catch(($, e, next) => next(e))
+
+  on('turn.complete', async ($, e, next) => {
+    const res = await next(e)
+    await checkRepo($, false).catch(() => undefined)
+    return res
   }).catch(($, e, next) => next(e))
 }
