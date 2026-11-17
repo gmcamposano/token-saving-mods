@@ -255,7 +255,7 @@ export function registerPane(on: On) {
             </Text>
           </Box>
           <Text dimColor wrap="wrap">
-            {c.action === 'described' ? `${size} · described in words by Haiku` : c.action === 'full size' ? `${size} · full size` : `${size} pixels`}
+            {c.action === 'full size' ? `${size} · full size` : `${size} pixels`}
           </Text>
           <Text wrap="wrap">{`${commas(c.before)} → ${commas(c.after)} tokens`}</Text>
         </Box>

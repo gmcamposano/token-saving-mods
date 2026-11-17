@@ -12,10 +12,11 @@ It was called Image Offload. It does the same job under a name that says where t
 
 ## How it works
 
-- A `tool.call` hook waits for the tool's result, finds each picture, and shrinks it with macOS `sips` (scale 0.5, never under 512 px on the long side). Small pictures pass as they are.
+- A `tool.call` hook waits for the tool's result, finds each picture, and shrinks it (scale 0.5, never under 512 px on the long side). Small pictures pass as they are.
 - Browser pane screenshots keep their coordinate frame. The mod rewrites the tool's own line to `Screenshot size: 800x500 0.5-scale view; coordinate frame: 1600x1000`, so clicks still land in the right place.
 - Other pictures get a note that says how to map a point back to the original size.
 - A zoom, or a screenshot where Claude set its own `scale`, is left as Claude asked. When Claude needs small text, it zooms or reads the page as text.
+- The image tool: `sips` on macOS (built in), Python 3 with Pillow anywhere else (`pip install pillow` or the distro's `python3-pil`). With neither, the mod leaves pictures as they are, logs why and shows one toast.
 - Each shrink appends one line to `~/.claude/mods-logs/savings.jsonl` (with `mod: "efficient-browser-use"`) and one to `~/.claude/mods-logs/efficient-browser-use.log`, and shows a toast.
 
 ## The pane
@@ -43,14 +44,17 @@ What it shows:
 - `/efficient-browser`: status and tokens saved in this chat. It opens the pane too.
 - `/efficient-browser pane`: open the pane with every card from this chat.
 - `/efficient-browser full`: the next screenshot comes through at full size, then shrinking starts again.
-- `/efficient-browser describe`: a Haiku subagent writes each screenshot out in words, so Claude gets no picture. `/efficient-browser shrink` goes back.
 - `/efficient-browser scale 0.5`, `/efficient-browser min 512`: change the shrink.
 
 The `/mods` switchboard turns it off with `"efficient-browser-use": false` in `~/.claude/mods/switches.json`.
 
 ## Limits
 
-- Needs macOS (`sips`).
-- Describe mode loses exact positions. To click, Claude uses `read_page` or `find`, or you type `/efficient-browser full` and it takes the screenshot again.
+- Needs `sips` (macOS) or Python 3 with Pillow.
 - Pasted pictures in the prompt cannot be shrunk. A mod sees that they exist, but only a managed-settings install can read their bytes, and no hook can change the attachment list. The mod logs that they went by.
 - Do not load this mod and Image Offload at the same time. Both would shrink the same screenshot.
+
+## Tests
+
+- `claude plugin test plugins/efficient-browser-use`: unit tests for the coordinate frame, token estimate, each result shape, pictures Claude sized itself, and parsing the image tool's output.
+- `node --experimental-strip-types plugins/efficient-browser-use/shrink-check/shrink-check.ts`: runs the real shell scripts on real pictures (PNG, JPEG, RGBA, WebP, GIF, portrait, the 512 px floor, the thumbnail, no image tool, temp cleanup). `claude plugin test` cannot start processes, so this is the check for the shell side. Needs Python 3 with Pillow.

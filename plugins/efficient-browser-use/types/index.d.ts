@@ -7,7 +7,7 @@ export type ShotCard = {
   /** The tool's full name, for example mcp__Claude_Browser__computer. */
   tool: string
   /** What the mod did with it. A 'left alone' card stands for every picture one tool call left alone. */
-  action: 'shrank' | 'described' | 'full size' | 'left alone'
+  action: 'shrank' | 'full size' | 'left alone'
   /** 'left alone' only: how many pictures, and why, for example "already small (Claude set scale 0.45)". */
   count?: number
   reason?: string
@@ -16,7 +16,7 @@ export type ShotCard = {
   /** The original size in pixels. */
   w: number
   h: number
-  /** The new size in pixels; not set when the picture was described or let through. */
+  /** The new size in pixels; not set when the picture was let through. */
   nw?: number
   nh?: number
   /** Image tokens before and after, width x height / 750. */
@@ -28,7 +28,7 @@ export type ShotCard = {
 
 /**
  * The running totals for this chat. seen: every picture a tool gave Claude. images: the ones
- * shrunk or described. before and after: their tokens. pasted: pictures pasted in a prompt.
+ * shrunk. before and after: their tokens. pasted: pictures pasted in a prompt.
  */
 export type Totals = { seen: number; images: number; before: number; after: number; pasted: number }
 

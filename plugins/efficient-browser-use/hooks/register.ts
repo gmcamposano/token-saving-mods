@@ -1,21 +1,21 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { addShots, closePane, loadTotals, openPane, registerPane, resetPane, restoreShots, setBusy, setOff, setSwitchHidden, setThumb, setTotals } from './pane.tsx'
 import type { ShotCard } from '../types'
+import { parseShrink, SHRINK, type Shrunk, shrinkPlan, sniff, THUMB } from './scripts.ts'
 
 // Efficient Browser Use: during a browser task Claude takes a screenshot after almost every click, and
-// each one costs about width x height / 750 tokens. This mod shrinks each screenshot with macOS `sips`
-// before Claude reads it, or in describe mode has a Haiku subagent write it out in words instead.
+// each one costs about width x height / 750 tokens. This mod shrinks each screenshot before Claude
+// reads it, with `sips` on macOS or Pillow elsewhere (see scripts.ts).
 // It owns every tool result with an image block (TOKEN-MODS-SPEC section 6): browser pane and Chrome
 // screenshots, Read on a picture, any connector that returns one. It was called Image Offload.
 
 const NAME = 'efficient-browser-use'
 const LABEL = 'Efficient Browser Use'
 
-type Mode = 'shrink' | 'describe'
-type Settings = { mode: Mode; scale: number; min: number }
+type Settings = { scale: number; min: number }
 
 // Half of each side is a quarter of the tokens. Never below 512 px on the long side.
-const DEFAULTS: Settings = { mode: 'shrink', scale: 0.5, min: 512 }
+const DEFAULTS: Settings = { scale: 0.5, min: 512 }
 // The API scales a picture down to 1568 px on its long side before the model sees it,
 // so a bigger one never costs more than that.
 const API_LONG = 1568
@@ -28,7 +28,7 @@ let settings: Settings = { ...DEFAULTS }
 // /efficient-browser full: how many tool results may still pass at full size.
 let fullPasses = 0
 let seq = 0
-let describerReady = false
+let toolWarned = false
 const totals = { seen: 0, images: 0, before: 0, after: 0, pasted: 0 }
 // "efficient-browser-use:hidden" in switches.json: the pane never opens by itself.
 let hidden = false
@@ -151,22 +151,14 @@ export function findImages(node: unknown, hits: Hit[] = []): Hit[] {
   return hits
 }
 
-function bytesOf(b: Obj): { base64: string; mime: string } {
+export function bytesOf(b: Obj): { base64: string; mime: string } {
   if (typeof b.data === 'string') return { base64: b.data, mime: String(b.mimeType ?? '') }
   if (isObj(b.source)) return { base64: String(b.source.data), mime: String(b.source.media_type ?? '') }
   const file = b.file as Obj
   return { base64: String(file.base64), mime: String(file.type ?? '') }
 }
 
-function sniff(base64: string, mime: string): string {
-  if (base64.startsWith('iVBOR')) return 'image/png'
-  if (base64.startsWith('/9j/')) return 'image/jpeg'
-  if (base64.startsWith('R0lGOD')) return 'image/gif'
-  if (base64.startsWith('UklGR')) return 'image/webp'
-  return mime || 'image/png'
-}
-
-function setBytes(b: Obj, base64: string, mime: string, w: number, h: number, nw: number, nh: number) {
+export function setBytes(b: Obj, base64: string, mime: string, w: number, h: number, nw: number, nh: number) {
   if (typeof b.data === 'string') {
     b.data = base64
     b.mimeType = mime
@@ -223,116 +215,30 @@ function shape(node: unknown, depth = 0): string {
 
 // ---- shrinking ----
 
-// Decodes stdin, reads the size, shrinks to scale (never under min), prints the new size and bytes.
-const SHRINK = `set -e
-in="$1"; out="$2"; scale="$3"; min="$4"; keep="$5"; fmt="$6"
-mkdir -p "$(dirname "$in")"
-base64 --decode > "$in"
-dims() { sips -g pixelWidth -g pixelHeight "$1" | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{print w, h}'; }
-set -- $(dims "$in")
-w=$1; h=$2; long=$w
-if [ "$h" -gt "$w" ]; then long=$h; fi
-target=$(awk -v l="$long" -v s="$scale" -v m="$min" 'BEGIN{t=int(l*s+0.5); if (t<m) t=m; print t}')
-echo "IN $w $h"
-if [ "$target" -ge "$long" ]; then
-  echo SKIP
-  if [ "$keep" != 1 ]; then rm -f "$in"; fi
-  exit 0
-fi
-if [ -n "$fmt" ]; then sips -Z "$target" -s format "$fmt" "$in" --out "$out" >/dev/null
-else sips -Z "$target" "$in" --out "$out" >/dev/null; fi
-set -- $(dims "$out")
-echo "OUT $1 $2"
-base64 -i "$out"
-rm -f "$out"
-if [ "$keep" != 1 ]; then rm -f "$in"; fi`
+type Shrink = Shrunk & { mime: string }
 
-type Shrunk = { w: number; h: number; nw?: number; nh?: number; base64?: string; mime: string; file: string }
-
-async function shrink($: EngineInterface, base64: string, mime: string, keep: boolean): Promise<Shrunk> {
+async function shrink($: EngineInterface, base64: string, mime: string): Promise<Shrink> {
   seq += 1
   const kind = sniff(base64, mime)
-  // sips writes PNG and JPEG back as they came; GIF and WebP become PNG.
-  const ext = kind === 'image/jpeg' ? 'jpg' : 'png'
-  const fmt = kind === 'image/jpeg' || kind === 'image/png' ? '' : 'png'
+  const plan = shrinkPlan(kind)
   const stem = `${tmpDir()}/${Date.now()}-${seq}`
-  const file = `${stem}-in.${kind === 'image/jpeg' ? 'jpg' : kind.split('/')[1] ?? 'png'}`
   const r = await $.process.run(
-    ['/bin/sh', '-c', SHRINK, 'sh', file, `${stem}-out.${ext}`, String(settings.scale), String(settings.min), keep ? '1' : '0', fmt],
+    ['/bin/sh', '-c', SHRINK, 'sh', `${stem}-in.${kind.split('/')[1] ?? 'png'}`, `${stem}-out.${plan.ext}`, String(settings.scale), String(settings.min), plan.fmt],
     { stdin: base64, timeoutMs: 20_000 },
   )
-  if (r.exitCode !== 0) throw new Error(`sips exit ${r.exitCode}: ${r.stderr.slice(0, 200)}`)
-  const lines = r.stdout.split('\n')
-  const head = /^IN (\d+) (\d+)$/.exec(lines[0] ?? '')
-  if (!head) throw new Error(`no size from sips: ${r.stdout.slice(0, 80)}`)
-  const w = Number(head[1])
-  const h = Number(head[2])
-  if (lines[1] === 'SKIP') return { w, h, mime: kind, file }
-  const out = /^OUT (\d+) (\d+)$/.exec(lines[1] ?? '')
-  if (!out) throw new Error(`no new size from sips: ${String(lines[1]).slice(0, 80)}`)
-  return { w, h, nw: Number(out[1]), nh: Number(out[2]), base64: lines.slice(2).join('').replace(/\s+/g, ''), mime: fmt ? 'image/png' : kind, file }
+  if (r.exitCode !== 0) throw new Error(`image tool exit ${r.exitCode}: ${r.stderr.slice(0, 200)}`)
+  return { ...parseShrink(r.stdout), mime: plan.mime }
 }
 
 // ---- the pane's small picture ----
-
-// A 160 px JPEG of the picture Claude got, for the newest cards in the pane.
-const THUMB = `set -e
-in="$1"; out="$2"
-mkdir -p "$(dirname "$in")"
-base64 --decode > "$in"
-sips --resampleHeightWidthMax 160 -s format jpeg -s formatOptions 60 "$in" --out "$out" >/dev/null
-base64 -i "$out"
-rm -f "$in" "$out"`
 
 async function thumbnail($: EngineInterface, cardId: string, base64: string) {
   const stem = `${tmpDir()}/thumb-${Date.now()}-${cardId}`
   const r = await $.process.run(['/bin/sh', '-c', THUMB, 'sh', `${stem}-in`, `${stem}.jpg`], { stdin: base64, timeoutMs: 10_000 })
   const out = r.stdout.replace(/\s+/g, '')
+  if (r.exitCode !== 0) throw new Error(`exit ${r.exitCode}: ${r.stderr.slice(0, 200)}`)
   // Over this size it is no thumbnail: the pane goes without.
-  if (r.exitCode === 0 && out && out.length < 60_000) await setThumb($, cardId, out)
-}
-
-// ---- describing (opt-in) ----
-
-const DESCRIBER_PROMPT = `You describe one picture for another AI assistant that cannot see it.
-Read the picture file you are given with the Read tool. Then answer with plain text only, at most 250 words, no preamble:
-- what it is (a web page, an app window, a chart, a photo, ...)
-- every piece of readable text, word for word, in reading order
-- buttons, fields, links and menus, with their rough place (top left, centre, ...)
-- the state it shows: errors, dialogs, selected or empty items, loading.`
-
-async function registerDescriber($: EngineInterface) {
-  if (describerReady) return
-  try {
-    await $.agent.register({
-      name: 'describer',
-      description: 'Efficient Browser Use only: describes one picture file in words. Not for general use.',
-      prompt: DESCRIBER_PROMPT,
-      tools: ['Read'],
-      model: 'haiku',
-    })
-    describerReady = true
-  } catch (err) {
-    void log($, `describer not registered, general-purpose on haiku instead: ${err instanceof Error ? err.message : String(err)}`)
-  }
-}
-
-async function describe($: EngineInterface, file: string): Promise<{ text: string; tokens: number | null }> {
-  const r = await $.tool.call({
-    tool: 'Agent',
-    description: 'Describe a picture',
-    prompt: describerReady ? `Describe the picture at ${file}` : `${DESCRIBER_PROMPT}\n\nThe picture: ${file}`,
-    subagent_type: describerReady ? `${NAME}:describer` : 'general-purpose',
-    model: 'haiku',
-  } as never)
-  const raw = 'text' in r && typeof r.text === 'string' ? r.text : ''
-  if (r.deny !== undefined || r.isError || !raw.trim()) throw new Error(r.deny ?? (raw.slice(0, 200) || 'no description'))
-  const used = /total_tokens:\s*(\d+)/.exec(raw)
-  const text = raw
-    .replace(/<usage>[\s\S]*?<\/usage>/g, '')
-    .replace(/^agentId:.*$/gm, '')
-    .trim()
-  return { text, tokens: used ? Number(used[1]) : null }
+  if (out && out.length < 60_000) await setThumb($, cardId, out)
 }
 
 // ---- the ledger ----
@@ -384,9 +290,8 @@ export function ownSizes(input: Obj, labels: string[], text: string, min: number
 // ---- the ledger, read back ----
 
 const SHRANK = /^shrank (\S+) picture (\d+)x(\d+) to (\d+)x(\d+)$/
-const DESCRIBED = /^described (\S+) picture (\d+)x(\d+) in words$/
 
-/** This chat's shrunk and described pictures, as the ledger has them. */
+/** This chat's shrunk pictures, as the ledger has them. */
 async function ledgerCards($: EngineInterface): Promise<Array<Omit<ShotCard, 'id'>>> {
   if (!session) return []
   const r = await $.process.run(['/usr/bin/grep', '-F', `"session":"${session}"`, ledgerPath()])
@@ -410,9 +315,7 @@ async function ledgerCards($: EngineInterface): Promise<Array<Omit<ShotCard, 'id
     }
     const a = String(row.action)
     const s = SHRANK.exec(a)
-    const d = DESCRIBED.exec(a)
     if (s) out.push({ ...base, tool: s[1]!, action: 'shrank', w: Number(s[2]), h: Number(s[3]), nw: Number(s[4]), nh: Number(s[5]) })
-    else if (d) out.push({ ...base, tool: d[1]!, action: 'described', w: Number(d[2]), h: Number(d[3]) })
   }
   return out
 }
@@ -429,14 +332,13 @@ export const register: Register = on => {
     Object.assign(totals, await loadTotals($).catch(() => totals))
     await $.command.register({
       name: 'efficient-browser',
-      description: 'Efficient Browser Use. pane: open the pane. full: let the next picture through at full size. shrink, describe, scale 0.5, min 512',
-      argumentHint: '[pane|full|shrink|describe|scale <0.2-0.9>|min <px>]',
+      description: 'Efficient Browser Use. pane: open the pane. full: let the next picture through at full size. scale 0.5, min 512',
+      argumentHint: '[pane|full|scale <0.2-0.9>|min <px>]',
       immediate: true,
     })
     const stored = await $.store.get('settings').catch(() => undefined)
     if (isObj(stored)) {
       settings = {
-        mode: stored.mode === 'describe' ? 'describe' : 'shrink',
         scale: typeof stored.scale === 'number' ? stored.scale : DEFAULTS.scale,
         min: typeof stored.min === 'number' ? stored.min : DEFAULTS.min,
       }
@@ -448,7 +350,6 @@ export const register: Register = on => {
         .then(() => checkOpen($))
         .catch(err => log($, `switch poll: ${String(err)}`))
     })
-    if (settings.mode === 'describe' && !off) await registerDescriber($)
     return next(e)
   })
 
@@ -468,8 +369,6 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     if (off) return next(e)
     const input = e as unknown as Obj
-    // The describer's own Read of a temp picture goes through untouched.
-    if (e.tool === 'Read' && e.agentId !== undefined && String(input.file_path ?? '').startsWith(tmpDir())) return next(e)
     const r = await next(e)
     if (off || r.deny !== undefined || r.isError) return r
     const hits = findImages(r.result)
@@ -508,9 +407,7 @@ export const register: Register = on => {
     const mine = findImages(result)
     const texts = findTexts(result)
     const notes: string[] = []
-    const keep = settings.mode === 'describe'
     let changed = false
-    let replaced: unknown = undefined
     let newest: { card: number; base64: string } | null = null
 
     const work = mine.map((hit, i) => ({ hit, i, why: own[i] ?? (full ? 'let through at full size (/efficient-browser full)' : null) }))
@@ -525,56 +422,21 @@ export const register: Register = on => {
     try {
       for (const { hit, i } of todo) {
         const { base64, mime } = bytesOf(hit.block)
-        let s: Shrunk
+        let s: Shrink
         try {
-          s = await shrink($, base64, mime, keep)
+          s = await shrink($, base64, mime)
         } catch (err) {
+          const said = err instanceof Error ? err.message : String(err)
           leave(i, 'could not be shrunk')
-          void log($, `${e.tool}: could not shrink, left as is: ${err instanceof Error ? err.message : String(err)}`)
+          void log($, `${e.tool}: could not shrink, left as is: ${said}`)
+          // No image tool on this machine: say it once per load, not on every screenshot.
+          if (said.includes('no image tool') && !toolWarned) {
+            toolWarned = true
+            $.ui.toast(`${LABEL} is not shrinking: ${said.replace(/^image tool exit \d+: /, '').trim()}`)
+          }
           continue
         }
         const before = imageTokens(s.w, s.h)
-
-        if (settings.mode === 'describe') {
-          try {
-            const d = await describe($, s.file)
-            const after = Math.ceil(d.text.length / 4)
-            const note = `[${LABEL}: this ${s.w}x${s.h} picture was described in words by Haiku instead of shown. To click on it, use read_page or find, or ask the user to type /efficient-browser full and take it again.]\n${d.text}`
-            if (isObj(hit.block.file)) {
-              // Read: a text result in Read's own shape.
-              replaced = { type: 'text', file: { filePath: String(input.file_path ?? ''), content: note, numLines: note.split('\n').length, startLine: 1, totalLines: note.split('\n').length } }
-            } else {
-              for (const k of Object.keys(hit.block)) delete hit.block[k]
-              hit.block.type = 'text'
-              hit.block.text = note
-            }
-            changed = true
-            totals.images += 1
-            totals.before += before
-            totals.after += after
-            cards.push({ tool: e.tool, action: 'described', w: s.w, h: s.h, before, after, note: note.slice(0, 1500), ...(id ? { toolUseId: id } : {}) })
-            await ledger($, {
-              tool_use_id: id,
-              action: `described ${e.tool} picture ${s.w}x${s.h} in words`,
-              before,
-              after,
-              helper: { model: 'claude-haiku-5-5', in: d.tokens, out: null, ...(d.tokens === null ? { note: 'subagent usage not reported' } : { note: 'in is the subagent total_tokens' }) },
-            }).catch(err => log($, `ledger: ${String(err)}`))
-            void log($, `${e.tool}: described ${s.w}x${s.h} (${before} -> ${after} tokens)`)
-            $.process.run(['/bin/rm', '-f', s.file]).catch(() => undefined)
-            continue
-          } catch (err) {
-            void log($, `describe failed, shrinking instead: ${err instanceof Error ? err.message : String(err)}`)
-            $.process.run(['/bin/rm', '-f', s.file]).catch(() => undefined)
-            // Fall through to shrinking.
-            try {
-              s = await shrink($, base64, mime, false)
-            } catch {
-              leave(i, 'could not be shrunk')
-              continue
-            }
-          }
-        }
 
         if (s.nw === undefined || s.nh === undefined || !s.base64) {
           leave(i, `already small (${s.w}x${s.h}, at most ${settings.min} px on the long side)`)
@@ -616,7 +478,7 @@ export const register: Register = on => {
     if (!changed) return r
     $.ui.status(statusLine())
     if (notes.length > 0) notes.push('For small text, use zoom or read the page as text. The user can type /efficient-browser full to let one full-size picture through.')
-    return { result: (replaced ?? result) as never, ...(notes.length > 0 ? { context: [notes.join('\n')] } : {}) }
+    return { result: result as never, ...(notes.length > 0 ? { context: [notes.join('\n')] } : {}) }
   // If anything above throws, the tool's own result stands: next(e) replays it, nothing runs twice.
   }).catch(($, e, next) => next(e))
 
@@ -634,17 +496,6 @@ export const register: Register = on => {
       fullPasses = 1
       return { text: `${LABEL}: the next picture comes through at full size. Then shrinking starts again.` }
     }
-    if (word === 'shrink' || word === 'describe') {
-      settings = { ...settings, mode: word }
-      await save()
-      if (word === 'describe') await registerDescriber($)
-      return {
-        text:
-          word === 'shrink'
-            ? `${LABEL}: shrink. Pictures come through at ${settings.scale} of their size, never under ${settings.min} px.`
-            : `${LABEL}: describe. Haiku writes each picture out in words, and Claude gets no picture. Type /efficient-browser shrink to go back.`,
-      }
-    }
     if (word === 'scale' || word === 'min') {
       const n = Number(value)
       const ok = word === 'scale' ? n >= 0.2 && n <= 0.9 : Number.isInteger(n) && n >= 256 && n <= 1568
@@ -655,10 +506,10 @@ export const register: Register = on => {
     }
     return {
       text: [
-        `${LABEL} is on, mode: ${settings.mode}, scale ${settings.scale}, never under ${settings.min} px.`,
+        `${LABEL} is on, scale ${settings.scale}, never under ${settings.min} px.`,
         `This chat: ${totals.seen} picture${totals.seen === 1 ? '' : 's'} seen, ${totals.images} shrunk, ~${fmt(totals.before)} tokens before, ~${fmt(totals.after)} after.`,
         ...(totals.pasted > 0 ? [`${totals.pasted} pasted picture(s) went through as they were: mods cannot shrink pasted pictures.`] : []),
-        'Type /efficient-browser pane, full, shrink, describe, scale 0.5 or min 512.',
+        'Type /efficient-browser pane, full, scale 0.5 or min 512.',
       ].join('\n'),
     }
   })
