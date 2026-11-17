@@ -15,13 +15,13 @@
       "name": "effort-optimizer",
       "source": "./plugins/effort-optimizer",
       "description": "Reads each prompt, picks the effort level it needs with Ben's four-question framework, and offers Switch to that level, or sets it by itself in auto mode",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     {
       "name": "model-router",
       "source": "./plugins/model-router",
       "description": "BenAI copy of claude-code-templates' Jev Model Router (MIT), changed to use Haiku in place of Jev. Haiku reads each subagent task at agent.spawn and answers in JSON with a tier and a confidence from 0 to 1; a task moves to a cheaper model only when that confidence is at least minDowngradeConfidence. Logs every pick, the model it replaced and the estimated cost difference to ~/.claude/mods-logs/savings.jsonl. No API key and no network call of its own. Never changes the main chat's model; main-chat effort routing is off by default.",
-      "version": "0.6.0"
+      "version": "0.7.0"
     },
     {
       "name": "cache-clock",

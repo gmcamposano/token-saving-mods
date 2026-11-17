@@ -43,7 +43,9 @@ export const TIER_ORDER: readonly Tier[] = ['fast', 'balanced', 'deep']
  * shape of the work, not about model names: the model never sees an id.
  */
 const TIER_CRITERIA: Record<Tier, string> = {
-  fast: 'Mechanical and local: read or summarise a file, run one command, rename a symbol, answer something already in context.',
+  // No code edits here: Anthropic's model guide (2026-11) keeps small models on
+  // work where a mistake is cheap to spot, and code edits on the main model.
+  fast: 'Mechanical, local and read-only: find files, read or summarise a file or log, run one command or the tests, answer something already in context. Any code edit is at least balanced.',
   balanced:
     'Ordinary engineering: implement a well-specified change across a few files, write tests, fix a clearly described bug, review a small diff.',
   deep: 'Hard or high-stakes: architecture and design, debugging a failure whose cause is unknown, security, data migrations, concurrency, anything touching production or money.',
@@ -195,6 +197,8 @@ export function rankOf(model: string, tiers: Tiers): number | null {
   if (lowered.includes('haiku')) return 0
   if (lowered.includes('sonnet')) return 1
   if (lowered.includes('opus')) return 2
+  // Above every tier: a move from Fable to any tier is a downgrade.
+  if (lowered.includes('fable')) return TIER_ORDER.length
   return null
 }
 
@@ -211,6 +215,7 @@ const ALIAS_IDS: Record<string, string> = {
   haiku: 'claude-haiku-5-5',
   sonnet: 'claude-sonnet-5-5',
   opus: 'claude-opus-5-5',
+  fable: 'claude-fable-5-2',
 }
 
 /**
@@ -296,13 +301,14 @@ export function route(
   const currentTier = rankOf(current.model, config.tiers)
   const wantedModel = config.tiers[tier]
   // Forcing skips the thresholds, not the tier check: a risky task already on
-  // the deep tier keeps its exact id (`claude-opus-5-5[1m]` stays as it is).
-  const sameTier = currentTier !== null && currentTier === wantedTier
+  // the deep tier keeps its exact id (`claude-opus-5-5[1m]` stays as it is),
+  // and one on a model above it (Fable) is never pulled down to it.
+  const atOrAbove = currentTier !== null && currentTier >= wantedTier
 
   const model =
     wantedModel &&
     wantedModel !== current.model &&
-    !(forced && sameTier) &&
+    !(forced && atOrAbove) &&
     (forced || allowed(wantedTier, currentTier, decision.confidence, config))
       ? wantedModel
       : null
@@ -462,13 +468,15 @@ export interface Price {
 }
 
 /**
- * List prices, as the claude-api skill cached them on 2026-10-06. Haiku 5.5
- * has a second card for a prompt over 100K tokens.
+ * List prices, checked against Anthropic's model guide on 2026-11-17. Haiku
+ * 5.5 has a second card for a prompt over 100K tokens. Cache writes are the
+ * 5-minute rate, 1.25x input.
  */
-export const PRICE_DATE = '2026-10-06'
+export const PRICE_DATE = '2026-11-17'
 const PRICES: Record<string, { small: Price; large?: Price }> = {
+  'claude-fable-5-2': { small: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 } },
   'claude-opus-5-5': { small: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 } },
-  'claude-sonnet-5-5': { small: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
+  'claude-sonnet-5-5': { small: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 } },
   'claude-haiku-5-5': {
     small: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
     large: { input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 },

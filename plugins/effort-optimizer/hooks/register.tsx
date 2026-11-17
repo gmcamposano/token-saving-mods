@@ -236,7 +236,19 @@ async function pick($: EngineInterface, text: string, now: Level | ''): Promise<
     timeoutMs: 20_000,
   })
   if (!r.isAnswered) throw new Error(`pick failed: ${r.reason}`)
-  return parsePick(r.text)
+  const p = parsePick(r.text)
+  return p ? capPick(p, now) : null
+}
+
+// Anthropic's model guide (2026-11): on Opus 5.5, xhigh scored about 1.4 points over high at 2.5x the cost,
+// and a self-check or Fable 5.2 at medium beats it on cost per task. So the mod never raises past high;
+// a level already set past high by hand is kept.
+const CAP_WHY = 'hard and critical: give Claude a test to check, or try Fable at medium'
+
+function capPick(p: Pick, now: Level | ''): Pick {
+  if (p.level !== 'xhigh' && p.level !== 'max') return p
+  if (now === 'xhigh' || now === 'max') return { level: now, why: p.why }
+  return { level: 'high', why: CAP_WHY }
 }
 
 async function hideLater($: EngineInterface, id: number) {

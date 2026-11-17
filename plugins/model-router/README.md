@@ -8,7 +8,7 @@ Picks the model each subagent runs on. Before a subagent starts, Haiku reads its
 
 | Tier | Default model | For |
 |---|---|---|
-| `fast` | `claude-haiku-5-5` | Mechanical and local work: read or summarise a file, run one command, rename a symbol. |
+| `fast` | `claude-haiku-5-5` | Mechanical, read-only work: find files, read or summarise a file or log, run one command or the tests. Code edits go to `balanced` or above. |
 | `balanced` | `claude-sonnet-5-5` | Ordinary engineering: a well-specified change across a few files, tests, a clearly described bug. |
 | `deep` | `claude-opus-5-5` | Hard or high-stakes work: design, unknown failures, security, migrations, concurrency. |
 
