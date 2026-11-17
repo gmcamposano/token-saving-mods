@@ -1,0 +1,1 @@
+{ "name": "prompt-coach", "version": "0.1.0", "description": "Lints each prompt with zero-token regex checks (think-hard filler, missing done criteria, hand-typed chart numbers) and shows a rate-limited toast; never blocks, never adds model context" }
