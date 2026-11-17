@@ -1,6 +1,7 @@
 import type { EngineInterface, ModelUsage, Register, SessionMessage } from 'claude-code'
 
 import type { Card, CardPart, CardTool } from '../types'
+import { type Chunk, chunk, cut, FILE_SYSTEM, fit, fmt, type Line, MAX_CHARS, maybeCut, noteMaxTokens, noteWords, promptFor, type Task, toLines } from './notes'
 
 // Input Router: anything big that comes into the chat from outside is read by Haiku first, and Claude gets
 // short notes and a path to the full thing. Two parts, one switch:
@@ -44,14 +45,8 @@ const ZOOM_PAGES = 5
 const READ_PAGE_CAP = 20
 // Core's default line count for a Read with an offset and no limit.
 const READ_LINES = 2000
-// What the helper reads per call, and in all. Longer files get their head and tail read.
-const CHUNK_CHARS = 120_000
-const MAX_CHARS = 960_000
-// Longer lines are cut, as core's Read cuts them (transcripts often have 1,000 to 1,300 character lines).
-const LINE_CHARS = 2000
 // $.fs.read stops at 4 MiB; bigger files are read with head and tail.
 const FS_MAX = 3_900_000
-const NOTE_WORDS = 1500
 const CALL_MS = 180_000
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'ico', 'avif'])
 const PDF_TOOLS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
@@ -251,10 +246,6 @@ function tokens(text: string) {
   return Math.ceil(text.length / 4)
 }
 
-function fmt(n: number) {
-  return n.toLocaleString('en-US')
-}
-
 function baseName(path: string) {
   return path.split('/').pop() ?? path
 }
@@ -452,12 +443,6 @@ const reading = (answered: number, of: number) => (of > 1 ? `Haiku is reading ${
 // File part (was Read Router)
 // ============================================================================
 
-const FILE_SYSTEM = [
-  'You write reading notes for another AI model. It will not see the file, only your notes.',
-  'Be exact and short. Cite every place with the line numbers given at the start of each line.',
-  'Plain text or simple markdown bullets. No preamble, no closing remarks, no em dashes.',
-].join(' ')
-
 // The notes body is kept; the header and footer around it are written when they are served, so they can say
 // whether Haiku wrote them for this task or earlier.
 type Notes = {
@@ -476,8 +461,6 @@ type Notes = {
   noun?: 'output'
 }
 type How = 'fresh' | 'kept' | 'disk'
-type Line = { n: number; text: string; page?: number }
-type Chunk = { lines: Line[] }
 type Source = {
   path: string
   kind: 'text' | 'pdf'
@@ -496,7 +479,7 @@ type Source = {
 }
 
 // Guard B: files Claude must see word for word. Skills, CLAUDE.md, AGENTS.md, memory files, settings and switches.
-function isInstruction(path: string) {
+export function isInstruction(path: string) {
   const base = baseName(path)
   return (
     base === 'SKILL.md' ||
@@ -509,9 +492,6 @@ function isInstruction(path: string) {
   )
 }
 
-// What a read is for: the person's real request (in a subagent, its own prompt) and Claude's words just before
-// the call. The request picks the notes: the same file for another request gets new notes.
-type Task = { user: string; assistant: string }
 const taskTag = (task: Task) => (task.user ? `|t${hash(task.user).slice(0, 6)}` : '')
 const notesKey = (path: string, st: { mtimeMs: number; size: number }, task: Task, extra = '') => `${path}|${st.mtimeMs}|${st.size}${extra}${taskTag(task)}`
 
@@ -545,51 +525,6 @@ const cache = new Map<string, Notes>()
 // Which loop got notes for which path, and from which Read call: session, agent and path.
 const noted = new Map<string, string>()
 const notedKey = (session: string, agentId: string | undefined, path: string) => `${session}\n${agentId ?? ''}\n${path}`
-
-function cut(text: string) {
-  return text.length > LINE_CHARS ? `${text.slice(0, LINE_CHARS)} [line cut]` : text
-}
-
-const size = (l: Line) => l.text.length + 10
-
-// Keeps line boundaries; one chunk is at most CHUNK_CHARS of numbered text.
-function chunk(lines: Line[]): Chunk[] {
-  const out: Chunk[] = []
-  let cur: Line[] = []
-  let n = 0
-  for (const line of lines) {
-    if (cur.length > 0 && n + size(line) > CHUNK_CHARS) {
-      out.push({ lines: cur })
-      cur = []
-      n = 0
-    }
-    cur.push(line)
-    n += size(line)
-  }
-  if (cur.length > 0) out.push({ lines: cur })
-  return out
-}
-
-// Over MAX_CHARS the helper reads the head and the tail; the gap is said in the notes.
-function fit(lines: Line[]): { kept: Line[]; gap: string } {
-  if (lines.reduce((s, l) => s + size(l), 0) <= MAX_CHARS) return { kept: lines, gap: '' }
-  const half = MAX_CHARS / 2
-  let h = 0
-  let n = 0
-  while (h < lines.length && n + size(lines[h]!) <= half) n += size(lines[h++]!)
-  let t = lines.length
-  n = 0
-  while (t > h && n + size(lines[t - 1]!) <= half) n += size(lines[--t]!)
-  const from = lines[h]?.n ?? 0
-  const to = lines[t - 1]?.n ?? 0
-  return { kept: [...lines.slice(0, h), ...lines.slice(t)], gap: `The helper skipped lines ${fmt(from)}-${fmt(to)} (too big to read whole).` }
-}
-
-function toLines(text: string, from: number): Line[] {
-  const raw = text.split('\n')
-  if (raw.length > 0 && raw[raw.length - 1] === '') raw.pop()
-  return raw.map((t, i) => ({ n: from + i, text: cut(t) }))
-}
 
 // null: binary content, let core answer.
 async function textSource($: EngineInterface, path: string, bytes: number): Promise<Source | null> {
@@ -640,7 +575,7 @@ async function bin($: EngineInterface, name: string) {
   return null
 }
 
-function parsePages(arg: string | undefined, total: number): { first: number; last: number } | null {
+export function parsePages(arg: string | undefined, total: number): { first: number; last: number } | null {
   if (arg === undefined || arg.trim() === '') return { first: 1, last: total }
   const m = /^\s*(\d+)\s*(?:-\s*(\d+)?)?\s*$/.exec(arg)
   if (!m) return null
@@ -726,47 +661,18 @@ async function pdfSource($: EngineInterface, path: string, pagesArg: string | un
   return { src, before, label }
 }
 
-function promptFor(src: Source, part: Chunk, i: number, of: number, words: number, task: Task) {
-  const first = part.lines[0]!
-  const last = part.lines[part.lines.length - 1]!
-  const where = src.kind === 'pdf' ? `pages ${first.page}-${last.page}, lines L${first.n}-L${last.n}` : `lines L${first.n}-L${last.n}`
-  const cite =
-    src.kind === 'pdf'
-      ? 'Cite places as p.<page> L<start>-L<end>. "=== Page N ===" lines mark where each page starts.'
-      : 'Cite places as L<start>-L<end>.'
-  const what =
-    src.kind === 'pdf' || /\.(md|mdx|txt|rst|html?|docx?|rtf|vtt|srt)\b/i.test(src.title ? (src.where ?? '') : src.path)
-      ? 'Cover: the headings and sections with where each starts, key facts, numbers, names, dates, definitions and conclusions.'
-      : 'Cover: the structure (sections, functions, classes, tables, config blocks) with where each starts, key values and names. For logs: first and last timestamps, each distinct error or warning with a count and where it first and last shows, and anything unusual.'
-  return [
-    `${src.title ?? `File: ${src.path}`}. Part ${i + 1} of ${of}: ${where}.`,
-    ...(task.user ? [`The agent's task (the person's request): ${task.user}`] : []),
-    ...(task.assistant ? [`Why the agent is reading this ${src.noun ?? 'file'} (its words just before the read): ${task.assistant}`] : []),
-    `Write notes that let the agent do this task without reading the ${src.noun ?? 'file'} itself, and know exactly where to look for the full text.`,
-    task.user || task.assistant ? 'Put first what the task needs. Then still cover the whole part, so nothing the task might need is missing.' : '',
-    cite,
-    what,
-    'Quote short exact strings when they matter (ids, error messages, keys, figures).',
-    `At most ${words} words.`,
-    '<text>',
-    part.lines.map(l => `L${l.n}: ${l.text}`).join('\n'),
-    '</text>',
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
 // null: a helper call failed, so the Read goes through as it is. The pane card follows every request.
 async function makeNotes($: EngineInterface, src: Source, before: number, label: string, signal: AbortSignal, task: Task): Promise<Notes | null> {
   const of = src.chunks.length
-  const words = Math.max(150, Math.min(600, Math.round(NOTE_WORDS / of)))
+  const words = noteWords(of)
+  const cap = noteMaxTokens(words)
   const plainNoun = src.noun ?? 'file'
   const card = await newCard($, { part: 'file', tool: src.tool ?? 'Read', label: src.label ?? baseName(src.path), where: src.where ?? src.path, before, requests: of, phase: 'working', state: reading(0, of) })
   let answered = 0
   try {
     const answers = await Promise.all(
       src.chunks.map((part, i) =>
-        ask($, FILE_SYSTEM, promptFor(src, part, i, of, words, task), words * 2 + 300, signal).then(async a => {
+        ask($, FILE_SYSTEM, promptFor(src, part, i, of, words, task), cap, signal).then(async a => {
           answered += 1
           await setCard($, card, { answered, state: reading(answered, of) })
           return a
@@ -787,7 +693,7 @@ async function makeNotes($: EngineInterface, src: Source, before: number, label:
       const last = part.lines[part.lines.length - 1]!
       const head =
         of === 1 ? '' : src.kind === 'pdf' ? `## Pages ${first.page}-${last.page} (L${first.n}-L${last.n})\n` : `## Lines ${first.n}-${last.n}\n`
-      bodies.push(`${head}${clean(r.text)}`)
+      bodies.push(`${head}${maybeCut(clean(r.text), r.usage?.output_tokens, cap)}`)
     }
     const helper = helperOf(answers[0]?.model ?? MODEL, calls)
     const notes: Notes = { body: bodies.join('\n\n'), about: src.about, covers: src.covers, exact: src.exact, before, helper, detail: null, label, full: src.full, ...(src.noun && { noun: src.noun }) }
@@ -1705,7 +1611,7 @@ type BashOut = { stdout: string; stderr: string; interrupted: boolean; isImage?:
 // The steps of a command, one per pipeline or list step, and one per $( ) inside it: the program, then its words.
 // Heredoc bodies and quoted text are blanked first, so a | or ; inside them does not split the command. Steps that
 // only set a variable, or are only loop words or comments, have no program. Anything odd is never a reader, so passes.
-function stepsOf(cmd: string): string[][] {
+export function stepsOf(cmd: string): string[][] {
   const plain = cmd
     .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, '<<Q')
     .replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, 'Q')
@@ -1727,13 +1633,13 @@ function stepsOf(cmd: string): string[][] {
   return out
 }
 
-function programs(cmd: string): string[] {
+export function programs(cmd: string): string[] {
   return stepsOf(cmd).map(s => s[0]!)
 }
 
 // Guard C: a grep or rg that lists files or counts matches finds where things are; it reads nothing. -c counts,
 // but -C, -A and -B add context lines, so they make it a read. Flag clusters (-rl, -nC3) count letter by letter.
-function grepFlags(prog: string, words: readonly string[]) {
+export function grepFlags(prog: string, words: readonly string[]) {
   let find = false
   let context = false
   for (const w of words) {
@@ -1755,7 +1661,7 @@ const FINDERS = new Set(['find', 'ls', 'fd', 'locate', 'mdfind', 'tree'])
 
 // A command that finds files or counts matches: every reader in it is a listing or counting grep, or it is only
 // find, ls and helpers.
-function findStyle(cmd: string) {
+export function findStyle(cmd: string) {
   const steps = stepsOf(cmd)
   if (steps.length === 0) return false
   const readers = steps.filter(st => READERS.has(st[0]!))
@@ -1771,20 +1677,20 @@ function findStyle(cmd: string) {
 const SCRIPTS = /^(python[0-9.]*|node|deno|bun|ruby|perl|php|osascript)$/
 
 // Only file and API reads are touched: never builds, tests, git, or anything Claude needs exactly as it ran.
-function isReader(cmd: string) {
+export function isReader(cmd: string) {
   const progs = programs(cmd)
   return progs.length > 0 && progs.every(p => READERS.has(p) || HELPERS.has(p)) && progs.some(p => READERS.has(p))
 }
 
 // `cat /abs/file` and nothing else: the same as a Read of that file.
-function catFile(cmd: string): string | null {
+export function catFile(cmd: string): string | null {
   const m = /^\s*cat\s+(?:'([^']+)'|"([^"]+)"|(\/\S+))\s*$/.exec(cmd)
   const path = m ? (m[1] ?? m[2] ?? m[3]) : undefined
   return path?.startsWith('/') ? path : null
 }
 
 // Whether the command names this text as a whole word: a path, not part of a longer name.
-function mentions(cmd: string, text: string) {
+export function mentions(cmd: string, text: string) {
   for (let i = cmd.indexOf(text); i >= 0; i = cmd.indexOf(text, i + 1)) {
     const before = i === 0 ? ' ' : cmd[i - 1]!
     const after = cmd[i + text.length] ?? ' '
@@ -1840,7 +1746,7 @@ const RANGE_PROGS = new Set(['cat', 'nl', 'sed', 'head', 'tail', 'awk', 'cut'])
 
 // The line range a plain sed -n 'A,Bp', head -n N, tail -n N or awk 'NR>=A && NR<=B' prints, or the whole file
 // for a plain cat or nl. null: some other shape.
-function rangeIn(cmd: string, total: number): { from: number; to: number } | null {
+export function rangeIn(cmd: string, total: number): { from: number; to: number } | null {
   if (!programs(cmd).every(p => RANGE_PROGS.has(p) || HELPERS.has(p))) return null
   let from = 1
   let to = total
@@ -1901,7 +1807,7 @@ async function fromFile($: EngineInterface, files: readonly string[], cmd: strin
 }
 
 // Where a reader command sends its output to disk instead of the chat: curl -o / --output, wget -O, > and >>, tee.
-function diskTargets(cmd: string) {
+export function diskTargets(cmd: string) {
   // Quoted text is held aside (a > inside an awk or grep pattern is not a redirect) and put back in the targets.
   const quotes: string[] = []
   const flat = cmd
