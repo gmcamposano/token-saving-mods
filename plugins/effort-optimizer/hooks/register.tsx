@@ -1,13 +1,23 @@
 import type { ConfigRow, EngineInterface, Register, SessionMessage } from 'claude-code'
 
 import type { Band, Level } from '../types'
+import {
+  asLevel,
+  capPick,
+  JUDGE_EFFORT,
+  JUDGE_MAX_TOKENS,
+  JUDGE_MODEL,
+  norm,
+  parsePick,
+  type Pick,
+  pickPrompt,
+} from './framework'
 
 const BAND = { plugin: 'effort-optimizer', key: 'band' } as const
 const OVERRIDE = { plugin: 'effort-optimizer', key: 'override' } as const
 // Fits the footer slot (about 14 cells).
 const SHORT = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'XHigh', max: 'Max' } as const
 
-const LEVELS: readonly Level[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const NAMES: Record<Level, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' }
 
 const APPLIED_MS = 15000
@@ -16,7 +26,6 @@ const GOOD = '#16a34a'
 const BAD = '#dc2626'
 
 type Mode = 'suggest' | 'auto'
-type Pick = { level: Level; why: string }
 
 // Module variables reset on a reload; the band and the override live in $.state.
 let home = ''
@@ -90,19 +99,6 @@ async function setBand($: EngineInterface, b: Band | null) {
   await $.state.set(BAND, b)
 }
 
-// "Extra high", "x-high" and "xhigh" all read as xhigh.
-function norm(s: string) {
-  const t = s.toLowerCase().replace(/[^a-z]/g, '')
-  if (t === 'extrahigh' || t === 'xhigh') return 'xhigh'
-  return t
-}
-
-function asLevel(v: unknown): Level | '' {
-  if (typeof v !== 'string') return ''
-  const t = norm(v)
-  return (LEVELS as readonly string[]).includes(t) ? (t as Level) : ''
-}
-
 function isEffortRow(r: ConfigRow) {
   if (!/effort/i.test(`${r.key} ${r.label}`)) return false
   if (r.kind !== 'choice') return false
@@ -161,17 +157,6 @@ function redraw($: EngineInterface) {
   }
 }
 
-// Plain text: no em or en dashes, never the banned word, one short line.
-function cleanWhy(raw: string) {
-  const r = raw
-    .replace(/\s*[—–]\s*/g, ', ')
-    .replace(/\bship(s|ped|ping)?\b/gi, 'publish')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^["'`\s]+|["'`\s.]+$/g, '')
-  return r.slice(0, 90)
-}
-
 function lastAssistantText(messages: readonly SessionMessage[]) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i]!
@@ -180,75 +165,19 @@ function lastAssistantText(messages: readonly SessionMessage[]) {
   return ''
 }
 
-// Ben's framework from the effort levels video: four questions, stop at the first yes.
-function pickPrompt(text: string, lastReply: string, now: Level | '') {
-  return `You pick the effort level an AI assistant (Claude) should use for one prompt. Effort sets how much time, reading and checking Claude spends, and how many decisions it makes alone. It is not how smart Claude is.
-
-Ask these four questions in this order and stop at the first yes:
-
-1. Will the person go back and forth with Claude on this, or is it a simple task? Then low.
-   Examples: brainstorming options, quick rewrites (friendlier, shorter), sorting or tagging items, short summaries, rough first drafts or outlines, small tweaks to something already made, simple questions.
-2. Would a hidden mistake cost money, a client, trust or a wrong decision? Then high.
-   Examples: checking numbers across sources, open-ended analysis with no set path (why did churn go up), reviewing a contract for risk, fact-checking, going through long documents, verifying and testing work made at a lower level, building or fixing a skill.
-3. Is the person handing off a long, hard and critical job and walking away, with no time to answer questions? All three must be true. Then xhigh.
-   Examples: a full research report from a year of calls and tickets, reviewing a 50 page agreement before signing, an investor pitch deck as the best one shot. Answer max only when the prompt asks for the deepest possible work and says it is critical; otherwise xhigh.
-4. Everything else is medium: everyday writing, repurposing content, meeting summaries with decisions and next steps, standard reports in a set format, quick research before a call. If you are not sure, medium.
-
-A task being long does not make it high. Rule-following work stays low or medium.
-If the prompt only approves, answers a question, or says to go on with earlier work (yes, go, ok, do it, option 2), answer keep.
-
-The chat runs at: ${now || 'unknown'}
-
-Claude's last reply (first 600 characters, for context):
-<reply>
-${lastReply || '(none, this is the first prompt)'}
-</reply>
-
-The new prompt:
-<prompt>
-${text}
-</prompt>
-
-Reply with JSON only: {"level": "low|medium|high|xhigh|max|keep", "why": "the reason in under 12 plain words"}`
-}
-
-function parsePick(text: string): Pick | null {
-  const m = /\{[\s\S]*\}/.exec(text)
-  if (!m) return null
-  try {
-    const j = JSON.parse(m[0]) as { level?: unknown; why?: unknown }
-    const level = asLevel(j.level)
-    if (!level) return null
-    return { level, why: cleanWhy(typeof j.why === 'string' ? j.why : '') }
-  } catch {
-    return null
-  }
-}
-
 async function pick($: EngineInterface, text: string, now: Level | ''): Promise<Pick | null> {
   const messages = await $.session.messages()
   const lastReply = lastAssistantText(messages).slice(0, 600)
   const r = await $.model.complete({
-    model: 'haiku', // classification work; same alias model-router's judge uses
+    model: JUDGE_MODEL,
     prompt: pickPrompt(text.slice(0, 4000), lastReply, now),
-    maxTokens: 120,
-    effort: 'low',
+    maxTokens: JUDGE_MAX_TOKENS,
+    effort: JUDGE_EFFORT,
     timeoutMs: 20_000,
   })
   if (!r.isAnswered) throw new Error(`pick failed: ${r.reason}`)
   const p = parsePick(r.text)
   return p ? capPick(p, now) : null
-}
-
-// Anthropic's model guide (2026-11): on Opus 5.5, xhigh scored about 1.4 points over high at 2.5x the cost,
-// and a self-check or Fable 5.2 at medium beats it on cost per task. So the mod never raises past high;
-// a level already set past high by hand is kept.
-const CAP_WHY = 'hard and critical: give Claude a test to check, or try Fable at medium'
-
-function capPick(p: Pick, now: Level | ''): Pick {
-  if (p.level !== 'xhigh' && p.level !== 'max') return p
-  if (now === 'xhigh' || now === 'max') return { level: now, why: p.why }
-  return { level: 'high', why: CAP_WHY }
 }
 
 async function hideLater($: EngineInterface, id: number) {
