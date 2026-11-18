@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { asLevel, CAP_WHY, capPick, cleanWhy, JUDGE_EFFORT, JUDGE_MODEL, parsePick, pickPrompt } from './framework'
+import { asLevel, CAP_WHY, capPick, cleanWhy, isGoOn, JUDGE_EFFORT, JUDGE_MODEL, parsePick, pickPrompt } from './framework'
 
 test('the judge runs on Haiku at low effort', () => {
   expect(JUDGE_MODEL).toBe('haiku')
@@ -59,4 +59,13 @@ test('pickPrompt carries the prompt, the last reply and the current level', () =
   expect(p).toContain('The chat runs at: medium')
   expect(pickPrompt('hi', '', '')).toContain('(none, this is the first prompt)')
   expect(pickPrompt('hi', '', '')).toContain('The chat runs at: unknown')
+})
+
+test('isGoOn skips the judge only for bare approvals and go-ons', () => {
+  for (const t of ['ok', 'Yes.', 'go ahead', 'sí, dale', 'Hazlo', 'continúa por favor', 'option 2', 'la 2', 'LGTM!', '3']) {
+    expect(isGoOn(t)).toBe(true)
+  }
+  for (const t of ['', 'no', 'sí, pero cambia el test', 'ok, now review the contract for risk', 'fix it', 'yes yes yes yes yes yes']) {
+    expect(isGoOn(t)).toBe(false)
+  }
 })

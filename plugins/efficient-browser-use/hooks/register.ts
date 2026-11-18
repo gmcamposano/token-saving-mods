@@ -29,6 +29,8 @@ let settings: Settings = { ...DEFAULTS }
 let fullPasses = 0
 let seq = 0
 let toolWarned = false
+// Who has read the zoom hint already: 'main' or a subagent's id. Each context reads it once, not under every picture.
+const hinted = new Set<string>()
 const totals = { seen: 0, images: 0, before: 0, after: 0, pasted: 0 }
 // "efficient-browser-use:hidden" in switches.json: the pane never opens by itself.
 let hidden = false
@@ -265,6 +267,15 @@ function sizedBy(a: Obj): string | null {
  * pictures are matched to the screenshot and zoom actions in order. When the counts differ, each
  * picture's own label line says it: "[computer:zoom]", or "0.6-scale view" for a scale.
  */
+export const HINT = 'For small text, use zoom or read the page as text. The user can type /efficient-browser full to let one full-size picture through.'
+
+// Adds the hint under the first shrunk picture a context sees; later ones carry only their own size line.
+export function hint(notes: string[], seen: Set<string>, who: string) {
+  if (notes.length === 0 || seen.has(who)) return
+  seen.add(who)
+  notes.push(HINT)
+}
+
 export function ownSizes(input: Obj, labels: string[], text: string, min: number, warn: (said: string) => void): Array<string | null> {
   const n = labels.length
   let why: Array<string | null>
@@ -477,7 +488,7 @@ export const register: Register = on => {
 
     if (!changed) return r
     $.ui.status(statusLine())
-    if (notes.length > 0) notes.push('For small text, use zoom or read the page as text. The user can type /efficient-browser full to let one full-size picture through.')
+    hint(notes, hinted, (e as { agentId?: string }).agentId ?? 'main')
     return { result: result as never, ...(notes.length > 0 ? { context: [notes.join('\n')] } : {}) }
   // If anything above throws, the tool's own result stands: next(e) replays it, nothing runs twice.
   }).catch(($, e, next) => next(e))

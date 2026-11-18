@@ -15,16 +15,16 @@ Gracias, Ben, por compartir tanto y tan bien explicado.
 | Mod | Versión | Qué hace | Origen |
 | --- | --- | --- | --- |
 | `input-router` | 0.4.0 | Haiku lee primero los archivos grandes y resultados de conectores; Claude recibe notas cortas y la ruta al original. Panel lateral en vivo. `/input-router full` deja pasar el siguiente completo. | Ben AI |
-| `effort-optimizer` | 0.2.2 | Elige el nivel de esfuerzo de cada prompt con el marco de cuatro preguntas de Ben y ofrece cambiarlo (o lo cambia solo en modo auto). | Ben AI |
+| `effort-optimizer` | 0.2.3 | Elige el nivel de esfuerzo de cada prompt con el marco de cuatro preguntas de Ben y ofrece cambiarlo (o lo cambia solo en modo auto). | Ben AI |
 | `model-router` | 0.7.1 | Haiku clasifica cada tarea de subagente y la baja a un modelo más barato solo si su confianza ≥ `minDowngradeConfidence`. Registra el ahorro estimado. Nunca cambia el modelo del chat principal. | claude-code-templates (MIT), cambios de Ben AI |
-| `cache-clock` | 0.3.0 | Cuenta regresiva hasta que el caché del prompt se enfría; ofrece handoff en chats grandes y "keep warm" en segundo plano. | Ben AI |
+| `cache-clock` | 0.3.1 | Cuenta regresiva hasta que el caché del prompt se enfría; ofrece handoff en chats grandes y "keep warm" en segundo plano. | Ben AI |
 | `handoff` | 0.1.0 | A los 250k tokens ofrece Refresh: resume el chat completo y lo copia o abre un chat nuevo con él. | Ben AI |
 | `research-router` | 0.4.1 | Saca la investigación web del chat principal: Haiku acorta resultados grandes y `/research-router` delega la lectura de páginas y devuelve un brief con fuentes. | Ben AI |
-| `efficient-browser-use` | 0.3.0 | Reduce cada screenshot del navegador (sips en macOS, Pillow en el resto). `/efficient-browser full` deja pasar uno a tamaño completo. | Ben AI |
+| `efficient-browser-use` | 0.3.1 | Reduce cada screenshot del navegador (sips en macOS, Pillow en el resto). `/efficient-browser full` deja pasar uno a tamaño completo. | Ben AI |
 | `mods` | 0.2.0 | Panel que detecta todos los mods, los activa o desactiva y abre los de panel lateral. | Ben AI |
 | `savings-proof` | 0.2.0 | `/savings` abre el panel con los tokens ahorrados por los demás mods, hoy y en este chat. | Ben AI |
 | `check-filter` | 0.2.0 | La salida larga de tests y linters (`rails test`, `rubocop`, `i18n-tasks`, `bundle-audit`, `brakeman`) llega como fallos exactos + resumen; el log completo queda en un archivo. Determinista, sin Haiku. | Propio |
-| `prompt-coach` | 0.2.1 | Linter de prompts sin tokens: avisos por relleno tipo "think hard", criterios de "hecho" ausentes y números de gráficos tecleados a mano; avisa si este repo tiene cambios sin subir o commits nuevos en GitHub. | Propio |
+| `prompt-coach` | 0.2.2 | Linter de prompts sin tokens: avisos por relleno tipo "think hard", criterios de "hecho" ausentes y números de gráficos tecleados a mano; avisa si este repo tiene cambios sin subir o commits nuevos en GitHub. | Propio |
 
 ## Instalar
 

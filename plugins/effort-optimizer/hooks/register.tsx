@@ -4,6 +4,7 @@ import type { Band, Level } from '../types'
 import {
   asLevel,
   capPick,
+  isGoOn,
   JUDGE_EFFORT,
   JUDGE_MAX_TOKENS,
   JUDGE_MODEL,
@@ -44,6 +45,7 @@ let rowKey = ''
 // The level the mod puts on requests, and the picker level it saw when it took over.
 let hold: { level: Level; base: string } | null = null
 let lastEffort = ''
+let lastChange = ''
 // The prompt waiting for its pick at the turn's first request.
 let held: { text: string; mine: number } | null = null
 
@@ -313,13 +315,19 @@ export const register: Register = on => {
     if (held && e.index === 0 && enabled) {
       const h = held
       held = null
-      if (mode === 'auto') await autoAdjust($, h.text, h.mine).catch(err => log($, 'auto', err))
+      if (isGoOn(h.text)) void log($, 'skip', `no judge for a go-on prompt: ${h.text.slice(0, 40)}`)
+      else if (mode === 'auto') await autoAdjust($, h.text, h.mine).catch(err => log($, 'auto', err))
       else await suggest($, h.text, h.mine).catch(err => log($, 'suggest', err))
       value = enabled && hold ? hold.level : null
     }
     const want = turnLevel ?? (enabled ? (value ?? null) : null)
     if (!want || want === e.effort) return yield* next(e)
-    void log($, 'request', `${e.effort} -> ${want}`)
+    // Logged once per change, not on every request of a held level.
+    const change = `${e.effort} -> ${want}`
+    if (change !== lastChange) {
+      lastChange = change
+      void log($, 'request', change)
+    }
     return yield* next({ ...e, effort: want })
   })
 

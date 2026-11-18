@@ -1,4 +1,4 @@
-import type { Engine, Register } from 'claude-code'
+import type { EngineInterface as Engine, Register } from 'claude-code'
 
 // Zero-token prompt linter: toasts only the user sees. Nothing reaches the model.
 type Rule = { id: string; test: (t: string) => boolean; tip: string }
@@ -70,6 +70,8 @@ async function checkRemote($: Engine): Promise<void> {
   }
 }
 
+export const isMainTurn = (e: { agentId?: string }) => !e.agentId
+
 export const register: Register = on => {
   let n = 0
   const lastShown = new Map<string, number>()
@@ -98,7 +100,8 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const res = await next(e)
-    await checkRepo($, false).catch(() => undefined)
+    // Only the main chat's turns: a subagent's would run git once per subagent turn for the same toast.
+    if (isMainTurn(e)) await checkRepo($, false).catch(() => undefined)
     return res
   }).catch(($, e, next) => next(e))
 }

@@ -21,7 +21,9 @@ const MAX_PINGS = 30
 const MAX_MS = 2 * 60 * 60_000
 const MAX_FAILS = 3
 const RETRY_MS = 20_000
-const PING_PROMPT = 'Reply with the single word: ok'
+// No effort is named: a level other than the session's can make the fork write the whole chat to the cache
+// again. The haste is asked for in the words instead, so a high-effort chat does not think over each ping.
+export const PING_PROMPT = 'You have no tools. Answer straight away, without thinking it over: reply with the single word ok'
 const TIP = 'Each ping reads the chat from cache for a small part of the price (5 to 10%). Letting it go cold means writing it all again.'
 // Turns that are not the person typing: they do not count as "they are back".
 const BACKGROUND = new Set(['task-notification', 'scheduled-trigger', 'peer', 'peer-send-message', 'projects-relay', 'channel', 'coordinator', 'observer', 'observer-activity', 'auto-continuation'])

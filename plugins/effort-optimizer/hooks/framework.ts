@@ -67,6 +67,21 @@ ${text}
 Reply with JSON only: {"level": "low|medium|high|xhigh|max|keep", "why": "the reason in under 12 plain words"}`
 }
 
+// A bare approval or "go on" (yes, ok, dale, option 2): the judge's rule says keep, so no Haiku call is made.
+// Every word must be in this list; anything else ("sí, pero cambia X") still goes to the judge.
+const GO_ON = new Set(
+  (
+    'y yes yeah yep yup ok okay k go ahead on continue proceed do it sure sounds good lgtm approved next option please thanks ' +
+    'sí si dale vale listo adelante sigue seguir continúa continua continuar hazlo perfecto de acuerdo procede opción opcion ' +
+    'la el correcto exacto bien muy gracias porfa por favor va'
+  ).split(' '),
+)
+
+export function isGoOn(text: string) {
+  const words = text.toLowerCase().split(/[\s,.!¡?¿:;)(]+/).filter(Boolean)
+  return words.length > 0 && words.length <= 5 && words.every(w => GO_ON.has(w) || /^\d{1,2}$/.test(w))
+}
+
 export function parsePick(text: string): Pick | null {
   const m = /\{[\s\S]*\}/.exec(text)
   if (!m) return null

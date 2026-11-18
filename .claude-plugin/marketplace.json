@@ -3,7 +3,7 @@
   "owner": {
     "name": "Ben AI"
   },
-  "description": "Seven Claude Code mods that cut token cost, plus a /mods switchboard and a /savings pane",
+  "description": "Claude Code mods that cut token cost, plus a /mods switchboard and a /savings pane",
   "plugins": [
     {
       "name": "input-router",
@@ -15,7 +15,7 @@
       "name": "effort-optimizer",
       "source": "./plugins/effort-optimizer",
       "description": "Reads each prompt, picks the effort level it needs with Ben's four-question framework, and offers Switch to that level, or sets it by itself in auto mode",
-      "version": "0.2.2"
+      "version": "0.2.3"
     },
     {
       "name": "model-router",
@@ -27,7 +27,7 @@
       "name": "cache-clock",
       "source": "./plugins/cache-clock",
       "description": "Counts down until the chat's prompt cache goes cold, above the prompt. When a big chat goes cold, offers a handoff to a fresh chat. Keep warm pings the cache in the background so it does not go cold",
-      "version": "0.3.0"
+      "version": "0.3.1"
     },
     {
       "name": "handoff",
@@ -45,7 +45,7 @@
       "name": "efficient-browser-use",
       "source": "./plugins/efficient-browser-use",
       "description": "Cheaper browser tasks: shrinks every screenshot Claude takes while it drives a browser (sips on macOS, Pillow elsewhere). /efficient-browser full lets one full-size screenshot through",
-      "version": "0.3.0"
+      "version": "0.3.1"
     },
     {
       "name": "mods",
@@ -69,7 +69,7 @@
       "name": "prompt-coach",
       "source": "./plugins/prompt-coach",
       "description": "Zero-token prompt linter: rate-limited toasts for think-hard filler, missing done criteria and hand-typed chart numbers; toasts when this repo has unpushed changes, and once per session when GitHub has new commits",
-      "version": "0.2.1"
+      "version": "0.2.2"
     }
   ]
 }

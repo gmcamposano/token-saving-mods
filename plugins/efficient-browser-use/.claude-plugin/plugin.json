@@ -1,6 +1,6 @@
 {
   "name": "efficient-browser-use",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Cheaper browser tasks: shrinks every screenshot Claude takes while it drives a browser (sips on macOS, Pillow elsewhere). /efficient-browser full lets one full-size screenshot through",
   "author": {
     "name": "Ben AI",

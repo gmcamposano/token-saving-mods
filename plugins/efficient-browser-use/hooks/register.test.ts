@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { bytesOf, findImages, findTexts, imageTokens, ownSizes, relabel, setBytes } from './register.ts'
+import { bytesOf, findImages, findTexts, HINT, hint, imageTokens, ownSizes, relabel, setBytes } from './register.ts'
 
 type Obj = Record<string, unknown>
 const quiet = () => undefined
@@ -123,4 +123,20 @@ test('ownSizes: a batch with uneven counts falls back to labels and warns', () =
   const labels = ['[computer:screenshot] Screenshot size: 1600x1000', '[computer:zoom]', 'Screenshot size: 600x400 0.6-scale view; coordinate frame: 1000x667']
   expect(ownSizes(input, labels, '', 512, s => warned.push(s))).toEqual([null, 'a zoom, Claude picked its size', 'Claude set its own scale'])
   expect(warned.length).toBe(1)
+})
+
+test('hint: the zoom hint goes under the first shrunk picture of each context only', () => {
+  const seen = new Set<string>()
+  const first = ['shrank 1']
+  hint(first, seen, 'main')
+  expect(first).toEqual(['shrank 1', HINT])
+  const again = ['shrank 2']
+  hint(again, seen, 'main')
+  expect(again).toEqual(['shrank 2'])
+  const sub = ['shrank 3']
+  hint(sub, seen, 'agent-1')
+  expect(sub).toEqual(['shrank 3', HINT])
+  const none: string[] = []
+  hint(none, new Set(), 'main')
+  expect(none).toEqual([])
 })
