@@ -203,6 +203,16 @@ export function rankOf(model: string, tiers: Tiers): number | null {
 }
 
 /**
+ * Why Haiku is not asked about a subagent: the caller named its model, which is
+ * always kept, or it already runs on the fast tier. Null: ask.
+ */
+export function skipJudge(asked: string | undefined, current: string, tiers: Tiers): string | null {
+  if (asked) return `the caller named ${asked}, so it stands`
+  if (rankOf(current, tiers) === 0) return `${current} is already the fast tier`
+  return null
+}
+
+/**
  * The full id a family alias names on the main loop.
  *
  * `agent.spawn` takes an alias (`haiku`) the way the Agent tool does, but

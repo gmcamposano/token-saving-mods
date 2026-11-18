@@ -47,7 +47,7 @@ import {
   bareCommand,
 } from './policy.ts'
 import type { Decision, Effort, JudgeState, PolicyConfig, StepUsage } from './policy.ts'
-import { rankOf, TIER_ORDER } from './policy.ts'
+import { rankOf, skipJudge, TIER_ORDER } from './policy.ts'
 import { addCard, closePane, family, openPane, registerPane, resetPane, setBusy, setCard, setOff, setSwitchHidden } from './pane.tsx'
 import type { Outcome } from '../types'
 
@@ -557,6 +557,13 @@ export const register: Register = (on, options) => {
 
     // A fork inherits its parent's model; a resume keeps its own.
     if (!routeSubagentModel || e.fork || e.resume) return next(e)
+
+    // No judge call when its answer could not or should not move the model: saves a Haiku call per spawn.
+    const skip = skipJudge(asked, asked ?? e.parentModel, policy.tiers)
+    if (skip) {
+      await log($, `${e.subagentType}${task}: no judge, ${skip}`)
+      return next(e)
+    }
 
     // The pane's card goes up before Haiku answers, so the judging shows.
     const cardId = await addCard($, {

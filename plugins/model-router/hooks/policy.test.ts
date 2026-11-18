@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import {
+  skipJudge,
   bareCommand,
   type Decision,
   effortLevel,
@@ -139,4 +140,13 @@ test('list prices: Sonnet cache read is $0.10, Fable is priced, Haiku switches c
   expect(round(requestCost('haiku', { ...small, input_tokens: 100_001 }))).toBe(0.0500005)
   expect(round(requestCost('haiku', { ...small, input_tokens: 100_001 }, false))).toBe(0.0100001)
   expect(requestCost('gpt-9', small)).toBeNull()
+})
+
+test('skipJudge: no Haiku call for a named model or a fast-tier subagent', () => {
+  expect(skipJudge('opus', 'opus', TIERS)).toContain('caller named opus')
+  expect(skipJudge('haiku', 'haiku', TIERS)).toContain('caller named haiku')
+  expect(skipJudge(undefined, 'claude-haiku-5-5', TIERS)).toContain('fast tier')
+  expect(skipJudge(undefined, 'claude-opus-5-5', TIERS)).toBeNull()
+  expect(skipJudge(undefined, 'claude-sonnet-5-5', TIERS)).toBeNull()
+  expect(skipJudge(undefined, 'some-unknown-model', TIERS)).toBeNull()
 })
