@@ -1,7 +1,7 @@
 import type { EngineInterface, ModelUsage, Register, SessionMessage } from 'claude-code'
 
 import type { Card, CardPart, CardTool } from '../types'
-import { type Chunk, chunk, cut, FILE_SYSTEM, fit, fmt, type Line, MAX_CHARS, maybeCut, noteMaxTokens, noteWords, promptFor, type Task, toLines } from './notes'
+import { type Chunk, chunk, cut, FILE_SYSTEM, fit, fmt, type Line, MAX_CHARS, maybeCut, noteMaxTokens, noteWords, partsChars, promptFor, type Task, toLines } from './notes'
 
 // Input Router: anything big that comes into the chat from outside is read by Haiku first, and Claude gets
 // short notes and a path to the full thing. Two parts, one switch:
@@ -35,7 +35,7 @@ const MIN_TOKENS = 2000
 const EDIT_LINES = 100
 // How a short exact range is described to Claude. It must also be under the token limit, so long-line files need a
 // smaller limit.
-const SMALL_RANGE = `under ${EDIT_LINES} lines and under about ${MIN_TOKENS.toLocaleString('en-US')} tokens; if the lines are long, use a smaller limit, for example 10`
+const SMALL_RANGE = `under ${EDIT_LINES} lines and about ${MIN_TOKENS.toLocaleString('en-US')} tokens (for long lines a smaller limit, e.g. 10)`
 // Guard D, the piece counter: once the raw pieces of one file Claude has pulled in pass this share of it, the next
 // piece gets the file's notes instead.
 const COVER_SHARE = 0.5
@@ -558,11 +558,9 @@ async function textSource($: EngineInterface, path: string, bytes: number): Prom
   return {
     path,
     kind: 'text',
-    about: gap
-      ? `Text file, ${fmt(total)} lines. ${gap} Refs like L120-L140 are line numbers in the real file.`
-      : `Text file, ${fmt(total)} lines. Haiku read all ${fmt(total)} lines. Refs like L120-L140 are line numbers in the real file.`,
-    covers: gap ? 'These notes cover every line Haiku read' : 'These notes cover the whole file',
-    exact: `Read exact lines of ${path} (offset and limit, for example offset 120, limit 40) only when you must quote exact text, or right before you Edit or Write this file${gap ? ', or for the lines Haiku skipped' : ''}. A range ${SMALL_RANGE}, passes through as exact text.`,
+    about: `${fmt(total)} lines${gap ? `. ${gap}` : ', all read'}; L120 = its line 120.`,
+    covers: gap ? 'They cover every line Haiku read' : 'They cover the whole file',
+    exact: `Read exact lines of ${path} (offset/limit) only to quote exact text or right before you Edit or Write it${gap ? ', or for the skipped lines' : ''}; a range ${SMALL_RANGE} passes through as exact text.`,
     full: path,
     chunks: chunk(lines),
   }
@@ -645,11 +643,11 @@ async function pdfSource($: EngineInterface, path: string, pagesArg: string | un
   const src: Source = {
     path,
     kind: 'pdf',
-    about: `PDF, pages ${range.first}-${range.last} of ${total}.${where}${fitted.gap ? ` ${fitted.gap}` : ''} Refs: p.12 is the PDF page${wrote ? ', L340 is the line in that text file' : ''}.`,
-    covers: fitted.gap ? 'These notes cover every line Haiku read' : `These notes cover pages ${range.first}-${range.last}`,
+    about: `PDF, pages ${range.first}-${range.last} of ${total}.${where}${fitted.gap ? ` ${fitted.gap}` : ''} p.12 = PDF page${wrote ? ', L340 = line in that text file' : ''}.`,
+    covers: fitted.gap ? 'They cover every line Haiku read' : `They cover pages ${range.first}-${range.last}`,
     exact: wrote
-      ? `Read exact text only when you must quote it: Read ${sidecar} with offset and limit, or Read ${path} with pages (${ZOOM_PAGES} pages or fewer pass through untouched).`
-      : `Read exact text only when you must quote it: Read ${path} with pages (${ZOOM_PAGES} pages or fewer pass through untouched).`,
+      ? `Only to quote exact text: Read ${sidecar} with offset/limit, or Read ${path} with pages (${ZOOM_PAGES} pages or fewer pass through untouched).`
+      : `Only to quote exact text: Read ${path} with pages (${ZOOM_PAGES} pages or fewer pass through untouched).`,
     full: wrote ? sidecar : path,
     chunks: chunk(fitted.kept),
   }
@@ -664,7 +662,7 @@ async function pdfSource($: EngineInterface, path: string, pagesArg: string | un
 // null: a helper call failed, so the Read goes through as it is. The pane card follows every request.
 async function makeNotes($: EngineInterface, src: Source, before: number, label: string, signal: AbortSignal, task: Task): Promise<Notes | null> {
   const of = src.chunks.length
-  const words = noteWords(of)
+  const words = noteWords(of, partsChars(src.chunks))
   const cap = noteMaxTokens(words)
   const plainNoun = src.noun ?? 'file'
   const card = await newCard($, { part: 'file', tool: src.tool ?? 'Read', label: src.label ?? baseName(src.path), where: src.where ?? src.path, before, requests: of, phase: 'working', state: reading(0, of) })
@@ -710,23 +708,22 @@ async function makeNotes($: EngineInterface, src: Source, before: number, label:
 const lastCard = new Map<string, Card>()
 
 // What Claude reads: a header that says who wrote the notes and for what, the notes, and when to read exact lines.
-function frame(path: string, n: Notes, how: How) {
+export function frame(path: string, n: Pick<Notes, 'noun' | 'label' | 'about' | 'body' | 'covers' | 'exact'>, how: How) {
   const output = n.noun === 'output'
   const noun = output ? 'output' : 'file'
   const who =
-    how === 'fresh'
-      ? `Haiku (a helper model) read this ${noun} for this task and wrote these notes.`
-      : how === 'kept'
-        ? `Haiku (a helper model) wrote these notes earlier in this chat. The ${noun} has not changed since.`
-        : `Haiku (a helper model) wrote these notes in an earlier chat. The ${noun} has not changed since.`
-  const again = output ? 'run the command again or read the saved output' : 'read the file again'
-  const covers = `${n.covers}${how === 'fresh' ? ' and were written for this task' : ''}. You do not need to ${again} to check them.`
+    how === 'fresh' ? 'written for this task' : `written ${how === 'kept' ? 'earlier in this chat' : 'in an earlier chat'}; the ${noun} has not changed since`
   const subject = output ? `the output of \`${n.label}\`` : path
-  const thing = output ? 'the saved output' : extOf(path) === 'pdf' ? 'these pages' : 'this file'
-  const full = output
-    ? `Reading all or most of ${thing} again returns these same notes. For the exact text of all of it, ask the person to type /input-router full, then read it again.`
-    : `Reading ${thing} again, or a range of ${EDIT_LINES} lines or more or over about ${MIN_TOKENS.toLocaleString('en-US')} tokens, returns these same notes. For the exact text of all of it, ask the person to type /input-router full, then read it again.`
-  return [`[${TITLE}] Notes on ${subject}. ${who}`, n.about, '', n.body, '', covers, n.exact, full].join('\n')
+  const thing = output || extOf(path) !== 'pdf' ? 'most of it' : 'these pages'
+  const range = output ? '' : `, or a range of ${EDIT_LINES}+ lines or over about ${MIN_TOKENS.toLocaleString('en-US')} tokens,`
+  return [
+    `[${TITLE}] Notes by Haiku (a helper model) on ${subject}, ${who}. ${n.about}`,
+    '',
+    n.body,
+    '',
+    `${n.covers}: no need to ${output ? 're-run' : 're-read'} to check them. ${n.exact}`,
+    `Re-reading ${thing}${range} returns these notes; for the whole exact text, ask the person to type /input-router full, then read again.`,
+  ].join('\n')
 }
 
 // Notes are kept on disk by path, change time and size, so a reopened chat does not pay Haiku again. The format
@@ -744,7 +741,7 @@ async function loadNotes($: EngineInterface, path: string, key: string): Promise
     return {
       body: o.body,
       about: str(o.about),
-      covers: str(o.covers) || 'These notes cover the whole file',
+      covers: str(o.covers) || 'They cover the whole file',
       exact: str(o.exact),
       before: o.before,
       helper: null,
@@ -858,6 +855,14 @@ async function recordFile($: EngineInterface, e: { tool_use_id?: string; agentId
   await remember($, { part: 'file', label: notes.noun === 'output' ? notes.label : baseName(e.file_path), before: notes.before, after, how: fresh ? 'haiku' : 'kept notes' })
   await log($, 'file', 'notes', `${e.file_path} ${fmt(notes.before)} -> ${fmt(after)} tokens${fresh ? '' : ` (${how})`}`)
   return text
+}
+
+// Core's "unchanged since your last Read" answer. Claude Code 2.1.327 no longer has this result type (not in its
+// Read types, not in the binary), so these branches never fire there; they stay for builds that still send it.
+// Its file path, or null for any other result.
+export function unchanged(r: unknown): string | null {
+  const u = r as { type?: unknown; file?: { filePath?: unknown } } | null | undefined
+  return u?.type === 'file_unchanged' ? String(u.file?.filePath ?? '') : null
 }
 
 const UNCHANGED = (path: string) =>
@@ -1857,9 +1862,9 @@ function outputSource(saved: string, cmd: string, text: string): Source {
     path: saved,
     kind: 'text',
     title: `Output of the shell command \`${clip(cmd, 400)}\`, saved at ${saved}`,
-    about: `Command output, ${fmt(all.length)} lines. ${gap || `Haiku read all ${fmt(all.length)} lines.`} Refs like L120-L140 are line numbers in the saved output.`,
-    covers: gap ? 'These notes cover every line Haiku read' : 'These notes cover the whole output',
-    exact: `The full output is saved at ${saved}. Read exact lines of it (Read with offset and limit) only when you must quote exact text${gap ? ', or for the lines Haiku skipped' : ''}. Short ranges like that pass through untouched.`,
+    about: `${fmt(all.length)} lines${gap ? `. ${gap}` : ', all read'}; L120 = its line 120.`,
+    covers: gap ? 'They cover every line Haiku read' : 'They cover the whole output',
+    exact: `Full output: ${saved}. Read short ranges of it (offset/limit) only to quote exact text${gap ? ' or see the skipped lines' : ''}; they pass through untouched.`,
     full: saved,
     chunks: chunk(kept),
     label,
@@ -2116,13 +2121,14 @@ export const register: Register = on => {
     if (e.offset !== undefined || e.limit !== undefined || e.pages !== undefined) {
       let ran = await next(e)
       // Core may take offset 1 for the whole read under the notes and answer "unchanged": ask for the lines.
-      if (routed.has(e.file_path) && e.limit === undefined && ran.isError !== true && ran.result?.type === 'file_unchanged') {
+      if (routed.has(e.file_path) && e.limit === undefined && ran.isError !== true && unchanged(ran.result) !== null) {
         ran = await next({ ...e, limit: READ_LINES })
       }
       if (ran.deny !== undefined || ran.isError === true || ran.result === undefined) return ran
       const r = ran.result
       // The same range again, after this mod answered it with notes: core's "unchanged" points at those notes.
-      if (r.type === 'file_unchanged') return routedRanges.has(rangeKey(e)) ? answer(r.file.filePath, UNCHANGED(e.file_path)) : ran
+      const same = unchanged(r)
+      if (same !== null) return routedRanges.has(rangeKey(e)) ? answer(same, UNCHANGED(e.file_path)) : ran
       if (r.type !== 'text' || e.pages !== undefined) return ran
       try {
         const total = r.file.totalLines ?? r.file.numLines
@@ -2151,7 +2157,8 @@ export const register: Register = on => {
     const ran = await next(e)
     if (ran.deny !== undefined || ran.isError === true || ran.result === undefined) return ran
     const r = ran.result
-    if (r.type === 'file_unchanged') return routed.has(e.file_path) ? answer(r.file.filePath, UNCHANGED(e.file_path)) : ran
+    const same = unchanged(r)
+    if (same !== null) return routed.has(e.file_path) ? answer(same, UNCHANGED(e.file_path)) : ran
     if (r.type !== 'text') return ran
     return wholeRead($, e, ran, r.file.filePath, ran.text ?? r.file.content, 'whole read', next.signal)
   }).catch(($, e, next) => next(e))

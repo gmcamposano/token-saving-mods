@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { CHUNK_CHARS, chunk, CUT_NOTICE, cut, FILE_SYSTEM, fit, LINE_CHARS, MAX_CHARS, maybeCut, noteMaxTokens, noteWords, promptFor, toLines } from './notes'
+import { CHUNK_CHARS, chunk, CUT_NOTICE, cut, FILE_SYSTEM, fit, LINE_CHARS, MAX_CHARS, maybeCut, noteMaxTokens, noteWords, partsChars, promptFor, toLines } from './notes'
 
 const lines = (n: number, len: number) => toLines(Array.from({ length: n }, (_, i) => `${i + 1}`.padEnd(len, 'x')).join('\n'), 1)
 
@@ -87,4 +87,12 @@ test('promptFor: a PDF cites pages; docs get the document checklist; no task, no
 test('the system prompt asks for exact, cited notes', () => {
   expect(FILE_SYSTEM).toContain('It will not see the file, only your notes.')
   expect(FILE_SYSTEM).toContain('Cite every place')
+})
+
+test('word budget follows the text size: about chars / 32, never under 150 or over 600 a part', () => {
+  expect(noteWords(1, 9000)).toBe(281)
+  expect(noteWords(1, 2000)).toBe(150)
+  expect(noteWords(1, 500_000)).toBe(600)
+  expect(noteWords(4, 346_119)).toBe(noteWords(4))
+  expect(partsChars([{ lines: [{ n: 1, text: 'abc' }, { n: 2, text: '' }] }])).toBe(5)
 })

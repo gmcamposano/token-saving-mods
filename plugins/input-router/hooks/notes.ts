@@ -21,9 +21,18 @@ export function fmt(n: number) {
   return n.toLocaleString('en-US')
 }
 
-// Words per part: the hand-off's budget split across its parts, 150 to 600 each.
-export function noteWords(parts: number) {
-  return Math.max(150, Math.min(600, Math.round(NOTE_WORDS / parts)))
+// Words per part: the hand-off's budget split across its parts, 150 to 600 each. With the text's size (chars), the
+// budget is also held to about a quarter of the text's tokens (Haiku writes about 2 tokens a word, so chars / 32):
+// a 9,000-character output gets about 280 words, not 600, and the notes stay well under what they replace.
+export const CHARS_PER_WORD = 32
+export function noteWords(parts: number, chars?: number) {
+  const budget = chars === undefined ? NOTE_WORDS : Math.min(NOTE_WORDS, chars / CHARS_PER_WORD)
+  return Math.max(150, Math.min(600, Math.round(budget / parts)))
+}
+
+// What Haiku reads in all: the parts' text, a newline per line.
+export function partsChars(parts: readonly Chunk[]) {
+  return parts.reduce((n, p) => n + p.lines.reduce((m, l) => m + l.text.length + 1, 0), 0)
 }
 
 // The output cap for one part's notes. Haiku thinks even at effort low and its thinking counts against the cap,

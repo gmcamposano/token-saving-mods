@@ -13,5 +13,7 @@ Two layers, because `claude plugin test` cannot reach a model (the test kit stan
 - Fix: cap `words * 3 + 6000` (billed only when used) and `maybeCut` adds a notice under any part that used the whole cap.
 - After: 15/15 clean over 3 runs, highest part 4,474 of 7,125 tokens, $0.04 a run of 3.
 
+- 2026-11-18: word budget now follows the text size (`noteWords(parts, chars)`, about chars / 32, 150 to 600 a part) and two small cases (`small-code`, `small-diff`, ~7k characters, just over the Bash bar) were added; `--case 'small*'` runs a prefix. Before (600 words): notes 1,242-2,964 characters on those two; after (218-238 words): 941-1,166, 6/6 clean over 3 runs. The big cases are unchanged (7/7 clean, $0.017).
+
 Not covered yet: the connector path (`CONNECTOR_SYSTEM`, JSON and MCP results, cap `HELPER_MAX_TOKENS`) and PDFs.
 Re-run the real eval after changing the prompt, the caps, the chunk sizes or the helper model.

@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chunk, FILE_SYSTEM, fit, noteMaxTokens, noteWords, promptFor, type Task, toLines } from '../hooks/notes.ts'
+import { chunk, FILE_SYSTEM, fit, noteMaxTokens, noteWords, partsChars, promptFor, type Task, toLines } from '../hooks/notes.ts'
 
 type Case = { id: string; cmd: string; text: string; task: Task; must: RegExp[]; mustNot?: RegExp[] }
 
@@ -88,6 +88,39 @@ function twoJudges(): string {
   return out.join('\n')
 }
 
+// Small outputs, just over the 8,000-character bar: where the notes must stay well under the output itself.
+function smallCode(): string {
+  const out: string[] = []
+  for (let i = 1; i <= 200; i++) {
+    out.push(
+      i === 37
+        ? '  static RETRY_LIMIT = 7'
+        : i === 112
+          ? "  WEBHOOK_URL = 'https://hooks.example.test/ecf/v2'"
+          : i === 180
+            ? "    raise NcfError, 'NCF range exhausted for B01'"
+            : `  # ${pickOne(['service', 'sequence', 'invoice', 'tenant'])} helper ${i} ${'.'.repeat(Math.floor(rnd() * 30))}`,
+    )
+  }
+  return out.join('\n')
+}
+
+function smallDiff(): string {
+  const out: string[] = ['diff --git a/app/models/sale.rb b/app/models/sale.rb', '--- a/app/models/sale.rb', '+++ b/app/models/sale.rb']
+  for (let i = 1; i <= 250; i++) {
+    out.push(
+      i === 60
+        ? '-  ITBIS_RATE = 0.16'
+        : i === 61
+          ? '+  ITBIS_RATE = 0.18'
+          : i === 190
+            ? "-  test 'rejects a B02 sale without RNC' do"
+            : ` ${pickOne(['  def total', '  end', '  # rounding', '  validates :ncf'])} ${'.'.repeat(Math.floor(rnd() * 30))}`,
+    )
+  }
+  return out.join('\n')
+}
+
 const CASES: Case[] = [
   {
     id: 'log',
@@ -129,6 +162,20 @@ const CASES: Case[] = [
       /\bsame (judge )?model\b/i,
     ],
   },
+  {
+    id: 'small-code',
+    cmd: 'sed -n 1,200p app/services/ecf_sender.rb',
+    text: smallCode(),
+    task: { user: '¿cuántos reintentos hace, a qué URL va el webhook y qué error lanza cuando se acaban los NCF?', assistant: 'Leo ecf_sender.rb.' },
+    must: [/RETRY_LIMIT[^\n]{0,80}\b7\b|\b7\b[^\n]{0,80}(retr|reinten)/i, /hooks\.example\.test\/ecf\/v2/, /NCF range exhausted for B01/, /L180\b/],
+  },
+  {
+    id: 'small-diff',
+    cmd: 'git diff app/models/sale.rb',
+    text: smallDiff(),
+    task: { user: 'resume qué cambia este diff y si quita algún test', assistant: 'Miro el diff.' },
+    must: [/0\.16/, /0\.18/, /B02/, /RNC/],
+  },
 ]
 
 const arg = (name: string, fallback: string) => {
@@ -162,12 +209,12 @@ function ask(model: string, prompt: string): Promise<Answer> {
   })
 }
 
-type Row = { id: string; fails: string[]; usd: number; parts: number; words: number; maxOut: number; cap: number; notes: string }
+type Row = { id: string; fails: string[]; usd: number; parts: number; words: number; maxOut: number; cap: number; notes: string; src?: number }
 
 async function run(model: string, c: Case): Promise<Row> {
   const all = toLines(c.text, 1)
   const parts = chunk(fit(all).kept)
-  const words = noteWords(parts.length)
+  const words = noteWords(parts.length, partsChars(parts))
   const cap = noteMaxTokens(words)
   const saved = `/tmp/input-router/results/eval-${c.id}.txt`
   const src = { path: saved, kind: 'text' as const, title: `Output of the shell command \`${c.cmd}\`, saved at ${saved}`, where: c.cmd, noun: 'output' as const }
@@ -182,7 +229,7 @@ async function run(model: string, c: Case): Promise<Row> {
   const maxOut = Math.max(...answers.map(a => a.out))
   const maxThink = Math.max(...answers.map(a => a.thinking))
   if (maxOut > cap) fails.push(`cut: a part used ${maxOut} output tokens (${maxThink} thinking), cap ${cap}`)
-  return { id: c.id, fails, usd: answers.reduce((s, a) => s + a.usd, 0), parts: parts.length, words, maxOut, cap, notes }
+  return { id: c.id, fails, usd: answers.reduce((s, a) => s + a.usd, 0), parts: parts.length, words, maxOut, cap, notes, src: c.text.length }
 }
 
 async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -201,7 +248,7 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Prom
 
 const dir = join(tmpdir(), `input-router-eval-${Date.now()}`)
 mkdirSync(dir, { recursive: true })
-const cases = CASES.filter(c => !only || c.id === only)
+const cases = CASES.filter(c => !only || c.id === only || (only.endsWith('*') && c.id.startsWith(only.slice(0, -1))))
 let exit = 0
 for (const [index, model] of models.entries()) {
   const work = Array.from({ length: runs }, () => cases).flat()
@@ -210,7 +257,7 @@ for (const [index, model] of models.entries()) {
   console.log(`${failed.length ? 'FAIL' : 'PASS'} ${model}: ${rows.length - failed.length}/${rows.length} hand-offs clean, $${rows.reduce((s, r) => s + r.usd, 0).toFixed(4)}`)
   for (const [i, r] of rows.entries()) {
     writeFileSync(join(dir, `${model}-${r.id}-${i}.md`), r.notes)
-    console.log(`  ${r.fails.length ? '✗' : '✓'} ${r.id.padEnd(14)} parts ${r.parts}, ${r.words} words/part, out max ${r.maxOut}/${r.cap} tok${r.fails.length ? `  ${r.fails.join('; ')}` : ''}`)
+    console.log(`  ${r.fails.length ? '✗' : '✓'} ${r.id.padEnd(14)} parts ${r.parts}, ${r.words} words/part, out max ${r.maxOut}/${r.cap} tok, src ${r.src ?? 0} → notes ${r.notes.length} chars${r.fails.length ? `  ${r.fails.join('; ')}` : ''}`)
   }
   if (index === 0 && failed.length) exit = 1
 }
