@@ -46,3 +46,8 @@ claude plugin marketplace update token-saving-mods
 ```
 
 Luego reinicia Claude Code. Antes de actualizar, `UPDATE.md` tiene un prompt para que Claude revise los cambios.
+
+## Otras guías
+
+- `MEMORY_SETUP.md`: cómo dejar CLAUDE.md, AGENTS.md, auto memory, permisos y skills de un proyecto según la doc oficial. Trae un prompt para pegar después del `pull`.
+- `NOTES.md`: parches de Linux y gotchas de desarrollo de los mods. Léelo antes de tocar un mod.
