@@ -1,6 +1,6 @@
 # Notas de desarrollo y gotchas
 
-Contexto que Claude necesita antes de tocar un mod. `~/.claude/CLAUDE.md` apunta aquí (ver `MEMORY_SETUP.md`).
+Contexto que Claude necesita antes de tocar un mod. `~/.claude/CLAUDE.md` apunta aquí (ver repo `gmcamposano/claude-config`).
 
 Marketplace `token-saving-mods` (11 plugins: input-router, effort-optimizer, model-router, cache-clock, handoff, research-router, efficient-browser-use, mods, savings-proof, check-filter, prompt-coach) is a directory source at `~/.claude/local-marketplaces/token-saving-mods` (moved from ~/Downloads 2026-11-13). Plugins are read live from that folder; don't delete it.
 

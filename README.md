@@ -49,5 +49,5 @@ Luego reinicia Claude Code. Antes de actualizar, `UPDATE.md` tiene un prompt par
 
 ## Otras guías
 
-- `MEMORY_SETUP.md`: cómo dejar CLAUDE.md, AGENTS.md, auto memory, permisos y skills de un proyecto según la doc oficial. Trae un prompt para pegar después del `pull`.
+- Configuración global de Claude Code (CLAUDE.md, settings, guía de memoria por proyecto): repo `gmcamposano/claude-config`.
 - `NOTES.md`: parches de Linux y gotchas de desarrollo de los mods. Léelo antes de tocar un mod.
