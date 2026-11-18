@@ -157,6 +157,12 @@ export function condense(command: string, output: string, exitCode: number | nul
 
 // ---------- engine glue ----------
 
+// The log keeps its last LOG_MAX bytes (as effort-optimizer's does), trimmed once per session start.
+export const LOG_MAX = 20_000
+export const TRIM_LOG = '[ -f "$1" ] && [ "$(wc -c < "$1")" -gt "$2" ] && tail -c "$2" "$1" > "$1.tmp" && mv "$1.tmp" "$1"; true'
+// /mods on/off is read this often; nothing else rides on this poll.
+export const SWITCH_POLL_MS = 10_000
+
 let home = ''
 let off = false
 let polling = false
@@ -223,9 +229,10 @@ export const register: Register = on => {
     }
     await readSwitch($)
     void sh($, 'find "$1" -type f -mtime +7 -delete 2>/dev/null; true', [`${home}/.claude/mods-logs/${NAME}`]).catch(() => undefined)
+    void sh($, TRIM_LOG, [`${home}/.claude/mods-logs/${NAME}.log`, String(LOG_MAX)]).catch(() => undefined)
     if (!polling) {
       polling = true
-      $.clock.every(3000, () => void readSwitch($).catch(() => undefined))
+      $.clock.every(SWITCH_POLL_MS, () => void readSwitch($).catch(() => undefined))
     }
     return next(e)
   })

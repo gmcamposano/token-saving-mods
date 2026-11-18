@@ -303,7 +303,8 @@ export const register: Register = on => {
       await log($, 'cleared a demo setting saved by an older version')
     }
     await readSwitch($).catch(() => undefined)
-    $.clock.every(3000, () => {
+    // /mods on/off and hide: 10 s is soon enough, and the clock's own 1 s tick does not need it.
+    $.clock.every(10_000, () => {
       void readSwitch($).catch(() => undefined)
     })
     await $.command.register({

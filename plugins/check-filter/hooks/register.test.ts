@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { condense } from './register'
+import { condense, LOG_MAX, SWITCH_POLL_MS, TRIM_LOG } from './register'
 
 const dots = (n: number) => Array.from({ length: n }, (_, i) => `noise line ${i}`)
 
@@ -118,4 +118,10 @@ test('a run that crashed before its summary: head, app frames, tail', () => {
   expect(out).toContain('test/test_helper.rb:3')
   expect(out).not.toContain('railties-8.1.0')
   expect(out.length < text.length / 3).toBe(true)
+})
+
+test('the log is trimmed to its last 20 KB and the switch is read every 10 s', () => {
+  expect(LOG_MAX).toBe(20_000)
+  expect(TRIM_LOG).toContain('tail -c "$2" "$1"')
+  expect(SWITCH_POLL_MS).toBe(10_000)
 })

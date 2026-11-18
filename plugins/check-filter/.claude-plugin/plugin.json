@@ -1,6 +1,6 @@
 {
   "name": "check-filter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Long output from tests and linters (rails test, rubocop, i18n-tasks, bundle-audit, brakeman) reaches Claude as exact failures + summary; full output saved to a file. Deterministic, no Haiku. /check-filter full lets the next one through whole",
   "keywords": ["mod", "function-hooks", "productivity"]
 }

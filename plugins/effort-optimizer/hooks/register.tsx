@@ -272,7 +272,8 @@ export const register: Register = on => {
     enabled = (await $.store.get('enabled')) !== false
     mode = (await $.store.get('mode')) === 'auto' ? 'auto' : 'suggest'
     await readSwitch($).catch(() => undefined)
-    $.clock.every(3000, () => {
+    // /mods on/off and hide: 10 s is soon enough.
+    $.clock.every(10_000, () => {
       void readSwitch($).catch(() => undefined)
     })
     void (async () => {
