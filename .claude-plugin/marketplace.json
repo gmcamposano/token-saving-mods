@@ -68,8 +68,8 @@
     {
       "name": "prompt-coach",
       "source": "./plugins/prompt-coach",
-      "description": "Zero-token prompt linter: rate-limited toasts for think-hard filler, missing done criteria and hand-typed chart numbers; toasts when this repo has unpushed changes, and once per session when GitHub has new commits",
-      "version": "0.2.2"
+      "description": "Zero-token prompt linter: asks before sending a short costly prompt with no detail; rate-limited toasts for think-hard filler, missing done criteria and hand-typed chart numbers; toasts when this repo has unpushed changes, and once per session when GitHub has new commits",
+      "version": "0.3.0"
     }
   ]
 }

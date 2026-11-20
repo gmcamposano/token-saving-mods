@@ -27,6 +27,13 @@ const RULES: Rule[] = [
 
 const COOLDOWN = 5 // prompts between repeats of the same tip
 
+// Gate (asks before sending, still zero model tokens): short prompt + costly/irreversible verb + no detail.
+const COSTLY = /\b(migra\w*|migrate|deploy\w*|despliega\w*|prod|producci[oó]n|production|borra\w*|elimina\w*|drop|reset|force|push|rm -rf)\b/i
+const DETAIL = /`|"|\w\/\w|\.(rb|ts|tsx|js|py|md|json|ya?ml|sql|sh|toml|env)\b/i
+const GATE_MAX = 120
+
+export const esCaraYVaga = (t: string) => t.length < GATE_MAX && COSTLY.test(t) && !DETAIL.test(t) && !DONE.test(t)
+
 // Unpushed-changes reminder for the mods repo itself. Local git only (no fetch), zero model tokens.
 const REPO_CHECK = [
   'sh',
@@ -76,13 +83,29 @@ export const register: Register = on => {
   let n = 0
   const lastShown = new Map<string, number>()
 
-  on('prompt.submit', ($, e, next) => {
+  let gateSkipUntil = 0
+
+  on('prompt.submit', async ($, e, next) => {
     if (e.command || e.isMeta) return next(e)
     if (e.origin && e.origin.kind !== 'composer' && e.origin.kind !== 'bridge') return next(e)
     n += 1
     // Ignore pasted material: only the user's own words count.
     const own = e.text.replace(/<pasted_content[\s\S]*?<\/pasted_content[^>]*>/g, '').trim()
     if (!own || own.startsWith('/')) return next(e)
+    if (n >= gateSkipUntil && esCaraYVaga(own)) {
+      const pick = await $.ui
+        .ask('prompt-coach: tarea cara con poco detalle. ¿Enviar igual?', {
+          options: ['Enviar igual', 'Lo reescribo'],
+          header: 'Prompt',
+        })
+        .catch(() => 'Enviar igual') // dismissed or -p: never lose a prompt
+      if (pick === 'Lo reescribo') {
+        $.ui.toast(`Tu prompt (para copiarlo): ${own}`, { timeoutMs: 15000 })
+        return { drop: 'prompt-coach: no enviado. Añade qué, dónde y cuándo está listo.' }
+      }
+      gateSkipUntil = n + COOLDOWN
+      return next(e)
+    }
     const hit = RULES.find(r => r.test(own) && n - (lastShown.get(r.id) ?? -COOLDOWN) >= COOLDOWN)
     if (hit) {
       lastShown.set(hit.id, n)

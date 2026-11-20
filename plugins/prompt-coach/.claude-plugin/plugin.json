@@ -1,5 +1,5 @@
 {
   "name": "prompt-coach",
-  "version": "0.2.2",
-  "description": "Lints each prompt with zero-token regex checks (think-hard filler, missing done criteria, hand-typed chart numbers) and shows a rate-limited toast; never blocks, never adds model context; also toasts when ~/.claude/local-marketplaces/token-saving-mods has uncommitted or unpushed changes"
+  "version": "0.3.0",
+  "description": "Lints each prompt with zero-token regex checks (think-hard filler, missing done criteria, hand-typed chart numbers) and shows a rate-limited toast; asks before sending a short costly prompt with no detail (deploy, migrate, delete...); never adds model context; also toasts when ~/.claude/local-marketplaces/token-saving-mods has uncommitted or unpushed changes"
 }

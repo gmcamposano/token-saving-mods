@@ -24,7 +24,7 @@ Gracias, Ben, por compartir tanto y tan bien explicado.
 | `mods` | 0.2.0 | Panel que detecta todos los mods, los activa o desactiva y abre los de panel lateral. | Ben AI |
 | `savings-proof` | 0.2.0 | `/savings` abre el panel con los tokens ahorrados por los demás mods, hoy y en este chat. | Ben AI |
 | `check-filter` | 0.2.1 | La salida larga de tests y linters (`rails test`, `rubocop`, `i18n-tasks`, `bundle-audit`, `brakeman`) llega como fallos exactos + resumen; el log completo queda en un archivo. Determinista, sin Haiku. | Propio |
-| `prompt-coach` | 0.2.2 | Linter de prompts sin tokens: avisos por relleno tipo "think hard", criterios de "hecho" ausentes y números de gráficos tecleados a mano; avisa si este repo tiene cambios sin subir o commits nuevos en GitHub. | Propio |
+| `prompt-coach` | 0.3.0 | Linter de prompts sin tokens: pregunta antes de enviar un prompt corto de tarea cara sin detalle (deploy, migrar, borrar…); avisos por relleno tipo "think hard", criterios de "hecho" ausentes y números de gráficos tecleados a mano; avisa si este repo tiene cambios sin subir o commits nuevos en GitHub. | Propio |
 
 ## Instalar
 
