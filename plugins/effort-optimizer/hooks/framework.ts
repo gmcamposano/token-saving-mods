@@ -35,21 +35,23 @@ export function cleanWhy(raw: string) {
   return r.slice(0, 90)
 }
 
-// Ben's framework from the effort levels video: four questions, stop at the first yes.
+// Ben's framework from the effort levels video (four questions, stop at the first yes), tuned for Opus 5.5:
+// medium is its default and matches older models at high, so high needs a hidden, costly mistake.
 export function pickPrompt(text: string, lastReply: string, now: Level | '') {
   return `You pick the effort level an AI assistant (Claude) should use for one prompt. Effort sets how much time, reading and checking Claude spends, and how many decisions it makes alone. It is not how smart Claude is.
 
-Ask these four questions in this order and stop at the first yes:
+Medium is the default. On Claude Opus 5.5, medium matches older models at high, so most work belongs here. Leave medium only when one of the questions below is clearly yes. Ask them in this order and stop at the first yes:
 
-1. Will the person go back and forth with Claude on this, or is it a simple task? Then low.
-   Examples: brainstorming options, quick rewrites (friendlier, shorter), sorting or tagging items, short summaries, rough first drafts or outlines, small tweaks to something already made, simple questions.
-2. Would a hidden mistake cost money, a client, trust or a wrong decision? Then high.
-   Examples: checking numbers across sources, open-ended analysis with no set path (why did churn go up), reviewing a contract for risk, fact-checking, going through long documents, verifying and testing work made at a lower level, building or fixing a skill.
+1. Will the person go back and forth with Claude on this, or is it a small task done in a step or two with little reading? Then low.
+   Examples: brainstorming options, quick rewrites (friendlier, shorter), sorting or tagging items, short summaries, rough first drafts or outlines, small tweaks to something already made, simple questions, a one-line rename.
+   Not low: anything that needs reading code or documents first, finding a bug's cause, writing a full document, or changing several files. That is medium.
+2. Is the main job judging or checking something where a mistake would stay hidden and cost money, a client, trust or a wrong decision, with no tests or set path to catch it? Then high.
+   Examples: reviewing a contract for risk, reconciling or checking numbers across sources (a difference nobody can explain yet), fact-checking, open-ended analysis with no set path (why did churn go up), a security or permissions audit, a migration that moves real production data, a final review of a risky change right before it goes live.
 3. Is the person handing off a long, hard and critical job and walking away, with no time to answer questions? All three must be true. Then xhigh.
    Examples: a full research report from a year of calls and tickets, reviewing a 50 page agreement before signing, an investor pitch deck as the best one shot. Answer max only when the prompt asks for the deepest possible work and says it is critical; otherwise xhigh.
-4. Everything else is medium: everyday writing, repurposing content, meeting summaries with decisions and next steps, standard reports in a set format, quick research before a call. If you are not sure, medium.
+4. Everything else is medium. This includes everyday coding: features, bug fixes, refactors, writing tests, explaining code, reviewing or fixing config, scripts and tools. Also everyday writing, repurposing content, meeting summaries with decisions and next steps, standard reports in a set format, quick research before a call. If you are not sure, medium.
 
-A task being long does not make it high. Rule-following work stays low or medium.
+Words like review, verify, check or fix do not make a task high by themselves; what matters is a costly mistake nothing else would catch. Working in a money, tax or legal domain does not make ordinary coding high: tests and the person's review catch its mistakes. A task being long does not make it high. Rule-following work stays low or medium.
 If the prompt only approves, answers a question, or says to go on with earlier work (yes, go, ok, do it, option 2), answer keep.
 
 The chat runs at: ${now || 'unknown'}

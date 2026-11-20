@@ -61,6 +61,13 @@ test('pickPrompt carries the prompt, the last reply and the current level', () =
   expect(pickPrompt('hi', '', '')).toContain('The chat runs at: unknown')
 })
 
+test('pickPrompt makes medium the default and keeps everyday coding there', () => {
+  const p = pickPrompt('fix the login bug', '', 'medium')
+  expect(p).toContain('Medium is the default')
+  expect(p).toContain('This includes everyday coding')
+  expect(p).toContain('do not make a task high by themselves')
+})
+
 test('isGoOn skips the judge only for bare approvals and go-ons', () => {
   for (const t of ['ok', 'Yes.', 'go ahead', 'sí, dale', 'Hazlo', 'continúa por favor', 'option 2', 'la 2', 'LGTM!', '3']) {
     expect(isGoOn(t)).toBe(true)
