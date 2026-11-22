@@ -41,7 +41,6 @@ let seen: Level | '' = ''
 let turnLevel: Level | null = null
 // The /config row that holds the effort setting, found at session start.
 let rowKey = ''
-// A /effort run waiting for the turn to end.
 // The level the mod puts on requests, and the picker level it saw when it took over.
 let hold: { level: Level; base: string } | null = null
 let lastEffort = ''
@@ -107,9 +106,17 @@ function isEffortRow(r: ConfigRow) {
   return (r.options ?? []).some(o => norm(o) === 'high')
 }
 
+// Claude Code 2.1.330 has no effort row in /config: once a look found none, the mod
+// stops asking and puts the level on each request, its normal path there.
+let rowChecked = false
+
 async function findRow($: EngineInterface) {
+  if (rowChecked && !rowKey) return null
   const rows = await $.config.list()
-  return rows.find(isEffortRow) ?? null
+  const row = rows.find(isEffortRow) ?? null
+  rowKey = row?.key ?? ''
+  rowChecked = true
+  return row
 }
 
 // The level the chat runs at now: the last request's, else the setting's.
@@ -139,12 +146,12 @@ async function applyLevel($: EngineInterface, level: Level) {
       }
       note = r.deny
     } else {
-      note = row ? (row.isLocked ? 'the effort setting is locked' : 'the effort setting has no such level') : 'no effort setting found'
+      note = row ? (row.isLocked ? 'the effort setting is locked' : 'the effort setting has no such level') : ''
     }
   } catch (err) {
     note = err instanceof Error ? err.message : String(err)
   }
-  await log($, 'set effort', note)
+  if (note) await log($, 'set effort', note)
   hold = { level, base: lastEffort }
   await $.state.set(OVERRIDE, level)
   redraw($)
@@ -278,8 +285,7 @@ export const register: Register = on => {
     })
     void (async () => {
       const row = await findRow($)
-      rowKey = row?.key ?? ''
-      await log($, 'effort row', row ? `${row.key} = ${String(row.value)} [${(row.options ?? []).join(', ')}]${row.isLocked ? ' locked' : ''}` : 'none found')
+      if (row) await log($, 'effort row', `${row.key} = ${String(row.value)} [${(row.options ?? []).join(', ')}]${row.isLocked ? ' locked' : ''}`)
     })().catch(err => log($, 'find row', err))
     return next(e)
   })
