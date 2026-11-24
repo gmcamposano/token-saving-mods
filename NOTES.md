@@ -2,7 +2,7 @@
 
 Contexto que Claude necesita antes de tocar un mod. `~/.claude/CLAUDE.md` apunta aquí (ver repo `gmcamposano/claude-config`).
 
-Marketplace `token-saving-mods` (11 plugins: input-router, effort-optimizer, model-router, cache-clock, handoff, research-router, efficient-browser-use, mods, savings-proof, check-filter, prompt-coach) is a directory source at `~/.claude/local-marketplaces/token-saving-mods` (moved from ~/Downloads 2026-11-13). Plugins are read live from that folder; don't delete it.
+Marketplace `token-saving-mods` (10 plugins: input-router, effort-optimizer, model-router, cache-clock, handoff, research-router, efficient-browser-use, mods, savings-proof, check-filter) is a directory source at `~/.claude/local-marketplaces/token-saving-mods` (moved from ~/Downloads 2026-11-13). Plugins are read live from that folder; don't delete it.
 
 The mods derive `home` by splitting their plugin root at `/.claude/`, so the folder must stay under a path containing `/.claude/`, otherwise logs land inside the plugin folder instead of `~/.claude/mods-logs/`.
 
@@ -22,4 +22,4 @@ Gotcha (2026-11-18): `$.model.fork` without `effort` runs at the session's effor
 
 Gotcha (2026-11-18): a `turn.step` effort rewrite lasts one step, so effort-optimizer re-applies its held level on every request; that is right, not waste. Measured in transcripts: at each switch (e.g. 22:52:47 medium→high) `cache_read` keeps growing and `cache_creation` is only the new content, so holding effort per request does not break the cache on Opus 5.5. Applying it "only when it changes" would let later steps fall back to the picker's level. Also: Claude Code 2.1.327 has no Read result `file_unchanged` (not in its types or binary); input-router keeps those branches behind `unchanged()` for builds that still send it.
 
-prompt-coach 0.3.0 (2026-11-20): gate `esCaraYVaga` en `prompt.submit` — prompt <120 chars + verbo caro (deploy/migra/borra/prod/push/reset…) + sin detalle (backtick, comillas, ruta, extensión) ni criterio DONE → `$.ui.ask` "¿Enviar igual?". "Lo reescribo" = `{ drop }` + toast con el texto (no consta que el drop lo devuelva al cuadro). Esc/-p → se envía. "Enviar igual" silencia el gate 5 prompts.
+prompt-coach eliminado del marketplace y de esta máquina (2026-11-23).

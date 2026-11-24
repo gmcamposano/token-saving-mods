@@ -64,12 +64,6 @@
       "source": "./plugins/check-filter",
       "description": "Long output from tests and linters (rails test, rubocop, i18n-tasks, bundle-audit, brakeman) reaches Claude as exact failures + summary; full output saved to a file. Deterministic, no Haiku. /check-filter full lets the next one through whole",
       "version": "0.2.1"
-    },
-    {
-      "name": "prompt-coach",
-      "source": "./plugins/prompt-coach",
-      "description": "Zero-token prompt linter: asks before sending a short costly prompt with no detail; rate-limited toasts for think-hard filler, missing done criteria and hand-typed chart numbers; toasts when this repo has unpushed changes, and once per session when GitHub has new commits",
-      "version": "0.3.0"
     }
   ]
 }

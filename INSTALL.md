@@ -1,4 +1,4 @@
-# Instalar token-saving-mods (11 mods)
+# Instalar token-saving-mods (10 mods)
 
 Requisito: Claude Code 2.1.287+ (probado en 2.1.326). Funciona en macOS y Linux.
 
@@ -35,16 +35,13 @@ Opcionales (los mods funcionan sin ellos):
    /plugin install mods@token-saving-mods
    /plugin install savings-proof@token-saving-mods
    /plugin install check-filter@token-saving-mods
-   /plugin install prompt-coach@token-saving-mods
    ```
 
 4. `/reload-plugins` (o reinicia Claude Code).
 
-5. Verifica: `/mods` abre el panel con los 11 mods; `/savings` abre el panel de ahorro.
-   Prueba prompt-coach escribiendo un prompt con "piensa bien": debe salir un aviso.
+5. Verifica: `/mods` abre el panel con los 10 mods; `/savings` abre el panel de ahorro.
 
-6. Opcional: aplica `extras/prompt-coach-regla.md`.
-7. En cada máquina: copia `extras/CLAUDE-global-regla.md` dentro de `~/.claude/CLAUDE.md` (Claude preguntará si sube cada cambio a GitHub).
+6. En cada máquina: copia `extras/CLAUDE-global-regla.md` dentro de `~/.claude/CLAUDE.md` (Claude preguntará si sube cada cambio a GitHub).
 
 ## Instalar desde GitHub (recomendado, igual en todas tus máquinas)
 
@@ -57,8 +54,7 @@ git clone https://github.com/gmcamposano/token-saving-mods ~/.claude/local-marke
 /plugin marketplace add ~/.claude/local-marketplaces/token-saving-mods
 ```
 
-Así cada máquina tiene un clon editable: prompt-coach avisa si hay cambios sin commit o sin push,
-y la regla de `extras/CLAUDE-global-regla.md` hace que Claude pregunte si los sube.
+Así cada máquina tiene un clon editable, y la regla de `extras/CLAUDE-global-regla.md` hace que Claude pregunte si los sube.
 Para traer cambios de otra máquina: `git -C ~/.claude/local-marketplaces/token-saving-mods pull`,
 luego `claude plugin marketplace update token-saving-mods` y reinicia.
 
