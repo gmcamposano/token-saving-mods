@@ -41,7 +41,7 @@ Opcionales (los mods funcionan sin ellos):
 
 5. Verifica: `/mods` abre el panel con los 10 mods; `/savings` abre el panel de ahorro.
 
-6. En cada máquina: copia `extras/CLAUDE-global-regla.md` dentro de `~/.claude/CLAUDE.md` (Claude preguntará si sube cada cambio a GitHub).
+6. Solo para el mantenedor del repo (si solo instalas los mods, omite este paso): copia `extras/CLAUDE-global-regla.md` dentro de `~/.claude/CLAUDE.md` (Claude preguntará si sube cada cambio a GitHub).
 
 ## Instalar desde GitHub (recomendado, igual en todas tus máquinas)
 
@@ -54,7 +54,7 @@ git clone https://github.com/gmcamposano/token-saving-mods ~/.claude/local-marke
 /plugin marketplace add ~/.claude/local-marketplaces/token-saving-mods
 ```
 
-Así cada máquina tiene un clon editable, y la regla de `extras/CLAUDE-global-regla.md` hace que Claude pregunte si los sube.
+Así cada máquina tiene un clon editable. Si mantienes el repo, la regla de `extras/CLAUDE-global-regla.md` (paso 6) hace que Claude pregunte si subes los cambios.
 Para traer cambios de otra máquina: `git -C ~/.claude/local-marketplaces/token-saving-mods pull`,
 luego `claude plugin marketplace update token-saving-mods` y reinicia.
 
