@@ -1,5 +1,19 @@
 import { expect, test } from 'claude-code/testing'
-import { asLevel, CAP_WHY, capPick, cleanWhy, isGoOn, JUDGE_EFFORT, JUDGE_MODEL, parsePick, pickPrompt } from './framework'
+import {
+  asFloor,
+  asLevel,
+  CAP_WHY,
+  capPick,
+  cleanWhy,
+  DEFAULT_FLOOR,
+  FLOOR_WHY,
+  floorPick,
+  isGoOn,
+  JUDGE_EFFORT,
+  JUDGE_MODEL,
+  parsePick,
+  pickPrompt,
+} from './framework'
 
 test('the judge runs on Haiku at low effort', () => {
   expect(JUDGE_MODEL).toBe('haiku')
@@ -50,6 +64,38 @@ test('capPick leaves low, medium and high alone', () => {
   for (const level of ['low', 'medium', 'high'] as const) {
     expect(capPick({ level, why: 'w' }, 'xhigh')).toEqual({ level, why: 'w' })
   }
+})
+
+test('the minimum is medium by default and only low, medium or high', () => {
+  expect(DEFAULT_FLOOR).toBe('medium')
+  expect(asFloor('Low')).toBe('low')
+  expect(asFloor('high')).toBe('high')
+  expect(asFloor('xhigh')).toBe('')
+  expect(asFloor('max')).toBe('')
+  expect(asFloor(undefined)).toBe('')
+})
+
+test('floorPick raises a pick below the minimum to the minimum', () => {
+  expect(floorPick({ level: 'low', why: 'quick tweak' }, 'medium', 'medium')).toEqual({ level: 'medium', why: FLOOR_WHY })
+  expect(floorPick({ level: 'low', why: 'quick tweak' }, '', 'medium')).toEqual({ level: 'medium', why: FLOOR_WHY })
+  expect(floorPick({ level: 'medium', why: 'w' }, 'high', 'high')).toEqual({ level: 'high', why: FLOOR_WHY })
+  expect(FLOOR_WHY.length).toBeLessThanOrEqual(90)
+})
+
+test('floorPick lets the judge raise or keep from the minimum', () => {
+  for (const level of ['medium', 'high'] as const) {
+    expect(floorPick({ level, why: 'w' }, 'medium', 'medium')).toEqual({ level, why: 'w' })
+  }
+  expect(floorPick({ level: 'low', why: 'w' }, 'medium', 'low')).toEqual({ level: 'low', why: 'w' })
+})
+
+test('floorPick keeps a level set below the minimum by hand', () => {
+  expect(floorPick({ level: 'low', why: 'w' }, 'low', 'medium')).toEqual({ level: 'low', why: 'w' })
+})
+
+test('un low retenido por el mod sube al mínimo', () => {
+  expect(floorPick({ level: 'low', why: 'w' }, 'low', 'medium', true)).toEqual({ level: 'medium', why: FLOOR_WHY })
+  expect(floorPick({ level: 'low', why: 'w' }, 'low', 'high', true)).toEqual({ level: 'high', why: FLOOR_WHY })
 })
 
 test('pickPrompt carries the prompt, the last reply and the current level', () => {

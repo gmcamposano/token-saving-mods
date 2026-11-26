@@ -1,4 +1,4 @@
-// The pure part of the effort pick: the judge's prompt, reading its answer and the cap.
+// The pure part of the effort pick: the judge's prompt, reading its answer, the cap and the floor.
 // No JSX and no engine calls, so register.tsx, the tests and evals/judge-eval.ts share one copy.
 import type { Level } from '../types'
 
@@ -106,4 +106,28 @@ export function capPick(p: Pick, now: Level | ''): Pick {
   if (p.level !== 'xhigh' && p.level !== 'max') return p
   if (now === 'xhigh' || now === 'max') return { level: now, why: p.why }
   return { level: 'high', why: CAP_WHY }
+}
+
+// The cap's mirror: a minimum level, set with /effort-optimizer min, medium by default. On Opus 5.5 low skips
+// reading and checking, and a "yes, do it" after a low pick keeps running at low (no judge call for go-ons).
+// So the judge may only raise or keep from the minimum; a level set below it by hand is kept, one this mod set
+// (held on requests, or put in the effort setting) is raised to the minimum.
+export const FLOOR_LEVELS = ['low', 'medium', 'high'] as const
+export type Floor = (typeof FLOOR_LEVELS)[number]
+export const DEFAULT_FLOOR: Floor = 'medium'
+export const FLOOR_WHY = 'kept at the minimum effort set for this mod'
+
+export function below(a: Level, b: Level) {
+  return LEVELS.indexOf(a) < LEVELS.indexOf(b)
+}
+
+export function asFloor(v: unknown): Floor | '' {
+  const l = asLevel(v)
+  return (FLOOR_LEVELS as readonly string[]).includes(l) ? (l as Floor) : ''
+}
+
+export function floorPick(p: Pick, now: Level | '', min: Floor, nowByMod = false): Pick {
+  if (!below(p.level, min)) return p
+  if (now && below(now, min) && !nowByMod) return { level: now, why: p.why }
+  return { level: min, why: FLOOR_WHY }
 }

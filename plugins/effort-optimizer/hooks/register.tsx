@@ -2,8 +2,13 @@ import type { ConfigRow, EngineInterface, Register, SessionMessage } from 'claud
 
 import type { Band, Level } from '../types'
 import {
+  asFloor,
   asLevel,
+  below,
   capPick,
+  DEFAULT_FLOOR,
+  type Floor,
+  floorPick,
   isGoOn,
   JUDGE_EFFORT,
   JUDGE_MAX_TOKENS,
@@ -32,6 +37,11 @@ type Mode = 'suggest' | 'auto'
 let home = ''
 let enabled = true
 let mode: Mode = 'suggest'
+// The lowest level the judge may pick (/effort-optimizer min), kept in $.store.
+let floor: Floor = DEFAULT_FLOOR
+// The level this mod last put in the effort setting, kept in $.store so a later session knows the picker's
+// level is the mod's and not the person's. Cleared when the picker shows another level.
+let applied: Level | '' = ''
 // Bumped on every prompt, so a slow pick for an older prompt is dropped.
 let gen = 0
 let nextId = 1
@@ -141,6 +151,8 @@ async function applyLevel($: EngineInterface, level: Level) {
     if (row && option && !row.isLocked) {
       const r = await $.config.set({ key: row.key, value: option })
       if (!r.deny) {
+        applied = level
+        await $.store.set('applied', level)
         await $.state.set(OVERRIDE, null)
         return ''
       }
@@ -174,6 +186,11 @@ function lastAssistantText(messages: readonly SessionMessage[]) {
   return ''
 }
 
+// True when the level the chat runs at was set by this mod (held on requests or put in the setting), not by hand.
+function setByMod(now: Level | '') {
+  return now !== '' && (hold?.level === now || applied === now)
+}
+
 async function pick($: EngineInterface, text: string, now: Level | ''): Promise<Pick | null> {
   const messages = await $.session.messages()
   const lastReply = lastAssistantText(messages).slice(0, 600)
@@ -186,7 +203,7 @@ async function pick($: EngineInterface, text: string, now: Level | ''): Promise<
   })
   if (!r.isAnswered) throw new Error(`pick failed: ${r.reason}`)
   const p = parsePick(r.text)
-  return p ? capPick(p, now) : null
+  return p ? floorPick(capPick(p, now), now, floor, setByMod(now)) : null
 }
 
 async function hideLater($: EngineInterface, id: number) {
@@ -273,11 +290,13 @@ export const register: Register = on => {
     home = $.plugin.root.split('/.claude/')[0] ?? ''
     await $.command.register({
       name: 'effort-optimizer',
-      description: 'Effort Optimizer. auto: set effort by itself. suggest: offer a switch. off or on',
-      argumentHint: '[auto|suggest|off|on]',
+      description: 'Effort Optimizer. auto: set effort by itself. suggest: offer a switch. min: lowest level. off or on',
+      argumentHint: '[auto|suggest|off|on|min low|medium|high]',
     })
     enabled = (await $.store.get('enabled')) !== false
     mode = (await $.store.get('mode')) === 'auto' ? 'auto' : 'suggest'
+    floor = asFloor(await $.store.get('min')) || DEFAULT_FLOOR
+    applied = asLevel(await $.store.get('applied'))
     await readSwitch($).catch(() => undefined)
     // /mods on/off and hide: 10 s is soon enough.
     $.clock.every(10_000, () => {
@@ -310,6 +329,11 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     if (off || e.agentId !== undefined || typeof e.effort !== 'string') return yield* next(e)
     lastEffort = e.effort
+    // The picker shows another level than the one this mod put there: it was moved by hand.
+    if (applied && !hold && e.effort !== applied) {
+      applied = ''
+      void $.store.set('applied', '').catch(() => undefined)
+    }
     // The picker moved (by hand, or /effort landed): the mod lets go.
     if (hold && e.effort !== hold.base) { hold = null; turnLevel = null }
     let value: Level | null = enabled && hold ? hold.level : null
@@ -341,6 +365,21 @@ export const register: Register = on => {
   on('command.run', { command: 'effort-optimizer' }, async ($, e) => {
     if (off) return { text: 'Effort Optimizer is off. Turn it on with /mods.' }
     const arg = e.args.trim().toLowerCase()
+    const [verb, minArg] = arg.split(/\s+/)
+    if (verb === 'min') {
+      const want = asFloor(minArg)
+      if (!want) return { text: `Minimum effort: ${NAMES[floor]}. Type /effort-optimizer min low, medium or high.` }
+      floor = want
+      await $.store.set('min', floor)
+      // A level the mod holds below the new minimum is let go, so the next request runs at the picker's level.
+      if (hold && below(hold.level, floor)) {
+        hold = null
+        turnLevel = null
+        await $.state.set(OVERRIDE, null)
+        redraw($)
+      }
+      return { text: `Effort Optimizer: minimum ${NAMES[floor]}. The judge can raise or keep the level, never pick below it.` }
+    }
     if (arg === 'auto' || arg === 'suggest') {
       mode = arg
       enabled = true
@@ -367,10 +406,10 @@ export const register: Register = on => {
     const { value } = await $.state.get(OVERRIDE)
     return {
       text: [
-        `Effort Optimizer is ${enabled ? 'on' : 'off'}, mode: ${mode}.`,
+        `Effort Optimizer is ${enabled ? 'on' : 'off'}, mode: ${mode}, minimum: ${NAMES[floor]}.`,
         `This chat runs at: ${now ? NAMES[now] : 'unknown yet'}${value ? ` (held by the mod: ${NAMES[value]})` : ''}.`,
         `Effort setting: ${rowKey || 'not found, the mod sets the level on each request'}.`,
-        'Type /effort-optimizer auto, suggest, off or on.',
+        'Type /effort-optimizer auto, suggest, off, on or min low|medium|high.',
       ].join('\n'),
     }
   })
