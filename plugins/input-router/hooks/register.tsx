@@ -2040,6 +2040,15 @@ const cutText = (text: string, n: number) => (text.length > n ? `${text.slice(0,
 // Hooks
 // ============================================================================
 
+// Guard E: a call a REPL script makes (core gives it a tool_use_id that starts with repl_) hands its result
+// to the script, not to Claude: the script parses it, edits with it or writes it back to disk, so notes in its
+// place would corrupt the work. It passes untouched; what the script returns is Claude's to keep short.
+export const fromScript = (e: { tool_use_id?: string }) => typeof e.tool_use_id === 'string' && e.tool_use_id.startsWith('repl_')
+
+async function passScript($: EngineInterface, part: Part, e: { tool: unknown; tool_use_id?: string }) {
+  await log($, part, 'pass', `${String(e.tool)} called from a REPL script (${e.tool_use_id}): its result goes to the script, passed untouched`)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     home = $.plugin.root.split('/.claude/')[0] ?? ''
@@ -2070,6 +2079,7 @@ export const register: Register = on => {
 
   // ---------- file ----------
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    if (fromScript(e)) return passScript($, 'file', e).then(() => next(e))
     if (!(await partOn($, 'file'))) return next(e)
     const ext = extOf(e.file_path)
     // Image files belong to Efficient Browser Use; notebooks keep their cells.
@@ -2165,6 +2175,7 @@ export const register: Register = on => {
 
   // ---------- Bash: file reads and API calls through the shell ----------
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    if (fromScript(e)) return passScript($, 'file', e).then(() => next(e))
     if (e.run_in_background || !((await partOn($, 'file')) || (await partOn($, 'connector')))) return next(e)
     const reader = isReader(e.command)
     const ran = await next(e)
@@ -2191,6 +2202,7 @@ export const register: Register = on => {
   // ---------- connector ----------
   on('tool.call', async ($, e, next) => {
     const tool = String(e.tool)
+    if (tool.startsWith('mcp__') && fromScript(e)) return passScript($, 'connector', e).then(() => next(e))
     if (!tool.startsWith('mcp__') || SKIP_SERVER.test(tool) || SKIP_TOOL.test(tool) || !(await partOn($, 'connector'))) return next(e)
     const ran = await next(e)
     if (off || ran.deny !== undefined || ran.isError) return ran

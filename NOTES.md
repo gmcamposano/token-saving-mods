@@ -25,3 +25,5 @@ Gotcha (2026-11-18): a `turn.step` effort rewrite lasts one step, so effort-opti
 prompt-coach eliminado del marketplace y de esta máquina (2026-11-23).
 
 Note (2026-11-26): effort-optimizer 0.4.0 adds a minimum level (`floorPick`, mirror of `capPick`), medium by default, set with `/effort-optimizer min low|medium|high` (kept in `$.store` key `min`). A low set by hand is kept; a low the mod set (hold, or `applied` in `$.store` for the config path, also from an earlier session) is raised. Go-on prompts skip the judge and inherit the held level, so before the floor a low pick carried into "sí, hazlo".
+
+Gotcha (2026-11-27): in Code Mode (REPL) the tools a script calls (file().text(), edit(), $`cat`, MCP tools) raise tool.call with tool_use_id repl_<uuid>, the model's own with toolu_. input-router answered those with notes, so a script wrote the notes over show_accounting.rb, edit() missed its anchors and JSON.parse failed on a Sheets result. Guard E (input-router 0.6.0) passes every repl_ call untouched. Any mod that rewrites tool results should skip repl_ calls the same way.

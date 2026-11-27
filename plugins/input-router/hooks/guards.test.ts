@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { catFile, diskTargets, findStyle, isInstruction, isReader, mentions, parsePages, programs, rangeIn } from './register'
+import { catFile, diskTargets, findStyle, fromScript, isInstruction, isReader, mentions, parsePages, programs, rangeIn } from './register'
 
 test('programs: skips env vars, starters and their flags, sees through pipes, && and $()', () => {
   expect(programs('cd /x && FOO=1 sudo -u me sed -n 1,5p f | head')).toEqual(['cd', 'sed', 'head'])
@@ -92,4 +92,10 @@ test('parsePages: whole, one page, ranges, open ranges and bad values', () => {
   expect(parsePages('4-40', 10)).toEqual({ first: 4, last: 10 })
   expect(parsePages('12', 10)).toBeNull()
   expect(parsePages('a-b', 10)).toBeNull()
+})
+
+test('Guard E, fromScript: calls a REPL script makes pass untouched; the model own calls do not', () => {
+  expect(fromScript({ tool_use_id: 'repl_de6364b9-f483-485d-bf47-a9938d91586b' })).toBe(true)
+  expect(fromScript({ tool_use_id: 'toolu_01H71TQuWR9Q7SphSy91QWeP' })).toBe(false)
+  expect(fromScript({})).toBe(false)
 })
