@@ -1394,7 +1394,7 @@ async function connector(
   }
 
   const now = await $.clock.now()
-  const server = shown ? 'bash' : (tool.split('__')[1] ?? 'mcp')
+  const server = shown ? shown.tool.toLowerCase() : (tool.split('__')[1] ?? 'mcp')
   const short = shown?.label ?? (tool.split('__').slice(2).join('__') || tool)
   const args = Object.fromEntries(Object.entries(e).filter(([k]) => !['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent'].includes(k)))
   const argsText = clip(JSON.stringify(args), PROMPT_CHARS)
@@ -2049,6 +2049,75 @@ async function passScript($: EngineInterface, part: Part, e: { tool: unknown; to
   await log($, part, 'pass', `${String(e.tool)} called from a REPL script (${e.tool_use_id}): its result goes to the script, passed untouched`)
 }
 
+
+// ---------- REPL (Code Mode), v0.7.0 ----------
+// In Code Mode Claude calls only REPL and Poll: every Read, Bash and connector call runs inside a script and passes
+// untouched (guard E). What reaches Claude is what a script returns: a REPL result, or the repl-eval events Poll
+// delivers. A big one goes to Haiku like a connector result. Poll's envelope (the nonce line, the event tags, the
+// other events) stays as it is: only the body of a big repl-eval event is replaced. Errors pass whole, and so does
+// a script that carries the mark `// exact` (Claude asks for its result word for word).
+export const EXACT_MARK = /\/\/\s*exact\b/i
+const REPL_EVENT = /(<event\b[^>]*\bkind="repl-eval"[^>]*>\n?)([\s\S]*?)(\n?<\/event>)/g
+export const unescapeBody = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+export const escapeBody = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+export const isErrorBody = (body: string) => /(^|\n)<error>/.test(body)
+
+export type ReplEvent = { evalId: string; body: string; start: number; end: number }
+
+/** The repl-eval events of a Poll result: each body with its place in the text. */
+export function replEvents(content: string): ReplEvent[] {
+  const found: ReplEvent[] = []
+  for (const m of content.matchAll(REPL_EVENT)) {
+    const head = m[1]!
+    const start = (m.index ?? 0) + head.length
+    found.push({ evalId: /\beval="(\d+)"/.exec(head)?.[1] ?? '', body: m[2]!, start, end: start + m[2]!.length })
+  }
+  return found
+}
+
+/** The Poll text with some event bodies replaced; everything else, envelope included, byte for byte. */
+export function spliceEvents(content: string, swaps: ReadonlyMap<number, string>, events: readonly ReplEvent[]) {
+  let out = ''
+  let at = 0
+  events.forEach((ev, i) => {
+    const next = swaps.get(i)
+    if (next === undefined) return
+    out += content.slice(at, ev.start) + next
+    at = ev.end
+  })
+  return out + content.slice(at)
+}
+
+const EXACT_LINE = 'For exact text, return a slice of that file under 16,000 characters (await file(path).slice(offset, limit)), or rerun the script with the comment // exact in it to get its result whole.'
+// The code of each eval Claude sent, by chat and eval number, so Haiku knows what the script was for.
+const replCode = new Map<string, string>()
+const REPL_CODE_MAX = 200
+
+function rememberCode(sid: string, evalId: string, code: string) {
+  replCode.set(`${sid}|${evalId}`, code)
+  if (replCode.size > REPL_CODE_MAX) replCode.delete(replCode.keys().next().value!)
+}
+
+async function replNote(
+  $: EngineInterface,
+  e: { tool_use_id?: string; agentId?: string },
+  evalId: string,
+  code: string,
+  text: string,
+  signal: AbortSignal | undefined,
+  held: { card?: Card },
+): Promise<string | null> {
+  const plainRan = { result: text }
+  const args = { tool: 'REPL', tool_use_id: e.tool_use_id, ...(e.agentId !== undefined && { agentId: e.agentId }), code: clip(code, PROMPT_CHARS) }
+  const where = clip(code.split('\n').find(l => l.trim()) ?? 'REPL script', 200)
+  const out = await connector($, args, 'REPL', plainRan, signal, held, { label: `REPL #${evalId || '?'}`, where, tool: 'REPL' })
+  if (out === plainRan) return null
+  const reply = (out as { result?: unknown }).result
+  return typeof reply === 'string' ? `${reply}\n\n${EXACT_LINE}` : null
+}
+
+type ReplOut = { code?: string; result?: unknown; stdout?: string; evalId?: number | string; asyncDispatched?: boolean }
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     home = $.plugin.root.split('/.claude/')[0] ?? ''
@@ -2217,6 +2286,71 @@ export const register: Register = on => {
     } finally {
       if (held.card?.phase === 'working') await setCard($, held.card, { phase: 'failed', state: 'Something broke, so Claude got the plain result' })
     }
+  }).catch(($, e, next) => next(e))
+
+  // ---------- REPL and Poll (Code Mode) ----------
+  on('tool.call', { tool: 'REPL' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (off || ran.deny !== undefined || ran.isError === true) return ran
+    const r = ran.result as ReplOut | undefined
+    if (!r || typeof r !== 'object') return ran
+    const sid = await sessionId($)
+    const code = typeof (e as { code?: unknown }).code === 'string' ? ((e as { code?: string }).code as string) : (r.code ?? '')
+    if (r.evalId !== undefined) rememberCode(sid, String(r.evalId), code)
+    // Dispatched: the output comes later, through Poll.
+    if (r.asyncDispatched || typeof r.result !== 'string' || r.result.length < MIN_CHARS) return ran
+    if (!(await partOn($, 'connector'))) return ran
+    if (EXACT_MARK.test(code)) {
+      await pass($, tokens(r.result), `REPL #${r.evalId ?? '?'}: the script asks for // exact, passed whole`)
+      return ran
+    }
+    const held: { card?: Card } = {}
+    try {
+      const reply = await replNote($, e, String(r.evalId ?? ''), code, r.result, next.signal, held)
+      return reply ? ({ ...ran, result: { ...r, result: reply } } as typeof ran) : ran
+    } catch (err) {
+      await log($, 'connector', 'REPL failed, plain result sent', err)
+      await status($, undefined)
+      return ran
+    } finally {
+      if (held.card?.phase === 'working') await setCard($, held.card, { phase: 'failed', state: 'Something broke, so Claude got the plain result' })
+    }
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'Poll' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (off || ran.deny !== undefined || ran.isError === true) return ran
+    const r = ran.result as { content?: unknown } | undefined
+    if (!r || typeof r.content !== 'string' || r.content.length < MIN_CHARS) return ran
+    if (!(await partOn($, 'connector'))) return ran
+    const content = r.content
+    const sid = await sessionId($)
+    const events = replEvents(content)
+    const swaps = new Map<number, string>()
+    for (const [i, ev] of events.entries()) {
+      if (ev.body.length < MIN_CHARS) continue
+      const code = replCode.get(`${sid}|${ev.evalId}`) ?? ''
+      if (isErrorBody(ev.body)) {
+        await pass($, tokens(ev.body), `REPL #${ev.evalId}: an error, passed whole`)
+        continue
+      }
+      if (EXACT_MARK.test(code)) {
+        await pass($, tokens(ev.body), `REPL #${ev.evalId}: the script asks for // exact, passed whole`)
+        continue
+      }
+      const held: { card?: Card } = {}
+      try {
+        const reply = await replNote($, e, ev.evalId, code, unescapeBody(ev.body), next.signal, held)
+        if (reply) swaps.set(i, `<result>${escapeBody(reply)}</result>`)
+      } catch (err) {
+        await log($, 'connector', `REPL #${ev.evalId} failed, plain result sent`, err)
+        await status($, undefined)
+      } finally {
+        if (held.card?.phase === 'working') await setCard($, held.card, { phase: 'failed', state: 'Something broke, so Claude got the plain result' })
+      }
+    }
+    if (!swaps.size) return ran
+    return { ...ran, result: { ...r, content: spliceEvents(content, swaps, events) } } as typeof ran
   }).catch(($, e, next) => next(e))
 
   // ---------- pane ----------

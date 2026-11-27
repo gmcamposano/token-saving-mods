@@ -1,7 +1,7 @@
 export type CardPart = 'file' | 'connector'
 
-/** The tool the hand-off came from: a Read, a Bash read (cat, grep, curl), or a connector tool. */
-export type CardTool = 'Read' | 'Bash' | 'connector'
+/** The tool the hand-off came from: a Read, a Bash read (cat, grep, curl), a connector tool, or a REPL result (Code Mode). */
+export type CardTool = 'Read' | 'Bash' | 'connector' | 'REPL'
 
 /** working: Haiku is reading. done: Claude got the notes. failed: the plain (or trimmed) result went on. kept: notes from earlier, no Haiku call. */
 export type CardPhase = 'working' | 'done' | 'failed' | 'kept'
